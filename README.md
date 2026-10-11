@@ -54,3 +54,18 @@ Obs.: no plano gratuito o servidor "dorme" após alguns minutos sem uso e a prim
 
 Testes: `npm test` (palavras, perfil, regras do servidor). Extras: `python3 test/qr_check.py` (QR lido pelo OpenCV) e `python3 test/ui_test.py` (partida completa no Chromium com Playwright).
 Variável de teste: `SEC_MS` escala a duração de 1 segundo do jogo.
+
+## Contas, perfil na nuvem e ranking global (Firebase)
+
+Opcional: sem configuração o jogo funciona igual, com o perfil só no aparelho.
+
+1. No [Console do Firebase](https://console.firebase.google.com) crie um projeto (plano Spark, grátis).
+2. **Authentication > Método de login**: ative **Google**. Em **Configurações > Domínios autorizados** adicione o domínio do seu site (ex.: `seu-jogo.onrender.com`).
+3. **Firestore Database**: crie o banco e, em **Regras**, cole o conteúdo de `firestore.rules` e publique.
+4. **Configurações do projeto > Seus apps > Web (`</>`)**: copie a configuração para `public/firebase-config.js` (`window.FIREBASE_CONFIG = {...}`).
+5. Publique de novo. Aparecem "Entrar com Google" e "Ranking global".
+
+Como funciona: ao entrar, o perfil da nuvem é mesclado com o do aparelho (maior valor de cada contador, conquistas somadas) e salvo a cada rodada. `users/{uid}` guarda o perfil completo (só o dono acessa) e `board/{uid}` o resumo público do ranking.
+
+Limite conhecido: o cliente grava o próprio XP, então um usuário técnico pode forjar valores (as regras só limitam formato e tamanho). Para um ranking à prova de trapaça, o servidor teria de calcular o XP e gravar com credenciais de administrador.
+Teste da integração com Firebase simulado: `python3 test/cloud_test.py`.

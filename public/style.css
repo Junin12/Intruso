@@ -303,3 +303,6 @@
   .award .aemoji { font-size: 1.6rem; }
   .award small { color: var(--muted); font-weight: 700; line-height: 1.2; }
   .award b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .acct { flex-direction: row; align-items: center; gap: 12px; }
+  .acct small { display: block; color: var(--muted); font-weight: 600; }
+  .acct .btn { width: auto; flex: none; min-height: 46px; }

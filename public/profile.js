@@ -133,8 +133,25 @@ const Profile = (() => {
     return finalize(p, before, gain, today);
   }
 
+  // Junta dois perfis (ex.: o do aparelho e o da nuvem): contadores pelo maior valor, conquistas somadas.
+  function merge(a, b) {
+    const out = Object.assign(blank(), a);
+    for (const k of ['xp', 'rounds', 'wins', 'impRounds', 'impWins', 'rightVotes', 'wordGuesses', 'duoWins', 'matches', 'matchWins', 'bestStreak', 'dailyDone', 'days']) {
+      out[k] = Math.max(Number(a[k]) || 0, Number(b[k]) || 0);
+    }
+    out.ach = Object.assign({}, b.ach, a.ach);
+    for (const id of Object.keys(b.ach || {})) if (a.ach && a.ach[id] && b.ach[id] < a.ach[id]) out.ach[id] = b.ach[id];
+    out.lastDay = [a.lastDay, b.lastDay].filter(Boolean).sort().pop() || '';
+    const newer = (a.lastDay || '') >= (b.lastDay || '') ? a : b;
+    out.streak = Number(newer.streak) || 0;
+    const da = a.daily, db = b.daily;
+    out.daily = !da ? db : !db ? da : da.day !== db.day ? (da.day > db.day ? da : db)
+      : ((da.done ? 1e9 : da.prog) >= (db.done ? 1e9 : db.prog) ? da : db);
+    return out;
+  }
+
   const unlocked = (p, i) => i < 12 || UNLOCKS.some((u) => u.i === i && u.test(p));
 
-  return { blank, levelInfo, onRound, onMatch, touch, dailyFor, dayKey, unlocked, ACH, UNLOCKS, DAILY, XP, TITLES };
+  return { merge, blank, levelInfo, onRound, onMatch, touch, dailyFor, dayKey, unlocked, ACH, UNLOCKS, DAILY, XP, TITLES };
 })();
 if (typeof module !== 'undefined') module.exports = Profile;

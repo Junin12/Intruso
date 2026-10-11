@@ -26,4 +26,12 @@ t('muda o desafio no dia seguinte', () => { const p = P.blank(); P.touch(p, '202
 t('campeão desbloqueia Rei', () => { const p = P.blank(); const r = P.onMatch(p, { champion: true }, day); assert.ok(p.ach.champ); assert.ok(r.avatars.includes(19)); });
 t('nível sobe e é informado', () => { const p = P.blank(); p.xp = 95; const r = P.onRound(p, { won: false }, day); assert.strictEqual(r.levelUp, 2); });
 t('cada desafio existe e tem meta', () => { P.DAILY.forEach((d) => assert.ok(d.goal > 0 && d.text)); assert.strictEqual(P.UNLOCKS.length, 8); });
+t('merge junta aparelho e nuvem sem perder nada', () => {
+  const a = P.blank(), b = P.blank();
+  a.xp = 300; a.ach.first = '2026-10-01'; a.lastDay = '2026-10-11'; a.streak = 2;
+  b.xp = 500; b.ach.win = '2026-09-01'; b.ach.first = '2026-09-20'; b.impWins = 4; b.lastDay = '2026-10-05';
+  const m = P.merge(a, b);
+  assert.strictEqual(m.xp, 500); assert.strictEqual(m.impWins, 4); assert.ok(m.ach.win); assert.strictEqual(m.ach.first, '2026-09-20');
+  assert.strictEqual(m.streak, 2); assert.strictEqual(m.lastDay, '2026-10-11');
+});
 console.log(n + ' ok');

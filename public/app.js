@@ -25,7 +25,58 @@ try { session = JSON.parse(ls.get('intruso-sessao')); } catch { session = null; 
 // ---------- perfil (fica no aparelho) ----------
 let prof = Object.assign(Profile.blank(), (() => { try { return JSON.parse(ls.get('intruso-perfil')) || {}; } catch { return {}; } })());
 Profile.touch(prof);
-const saveProf = () => ls.set('intruso-perfil', JSON.stringify(prof));
+const saveProf = () => {
+  ls.set('intruso-perfil', JSON.stringify(prof));
+  Cloud.pushSoon(() => ({ prof, name: ls.get('intruso-nome') || 'Jogador', avatar: myAvatar }));
+};
+
+// ---------- conta e ranking (Firebase; só aparece se firebase-config.js estiver preenchido) ----------
+let cloudUser = null, boardRows = null, boardErr = false;
+Cloud.onAuth(async (u) => {
+  cloudUser = u;
+  if (u) {
+    try {
+      const remote = await Cloud.pull();
+      if (remote) { prof = Profile.merge(prof, remote); Profile.touch(prof); }
+      ls.set('intruso-perfil', JSON.stringify(prof));
+      await Cloud.push(prof, ls.get('intruso-nome') || u.name.split(' ')[0] || 'Jogador', myAvatar);
+      toast('Conta conectada. Progresso sincronizado.', true);
+    } catch { toast('Conectou, mas não consegui sincronizar agora.'); }
+  }
+  render();
+});
+Cloud.init();
+
+async function loadBoard() {
+  boardRows = null; boardErr = false; render();
+  try { boardRows = await Cloud.board(50); } catch { boardErr = true; }
+  render();
+}
+
+function accountRow() {
+  if (!Cloud.enabled) return null;
+  return cloudUser
+    ? h('div', { class: 'panel flat acct' }, h('div', { class: 'grow' }, h('b', {}, 'Conta conectada'), h('small', {}, cloudUser.email || cloudUser.name)),
+      h('button', { class: 'btn', type: 'button', 'data-act': 'signOut' }, 'Sair'))
+    : h('div', { class: 'panel flat acct' }, h('div', { class: 'grow' }, h('b', {}, 'Salve seu progresso'), h('small', {}, 'Entre para guardar nível e conquistas e aparecer no ranking.')),
+      h('button', { class: 'btn primary', type: 'button', 'data-act': 'signIn' }, 'Entrar com Google'));
+}
+
+function rankScreen() {
+  const mine = cloudUser && cloudUser.uid;
+  return h('div', { class: 'screen rank', 'data-screen': 'rank' },
+    h('button', { class: 'btn ghost back', type: 'button', 'data-act': 'home' }, icon('back'), 'Voltar'),
+    h('div', { class: 'hero' }, h('h1', {}, 'Ranking global'), h('p', { class: 'sub' }, 'Os 50 jogadores com mais XP.')),
+    boardErr ? h('p', { class: 'panel' }, 'Não consegui carregar o ranking agora.')
+      : !boardRows ? h('p', { class: 'sub' }, 'Carregando…')
+        : !boardRows.length ? h('p', { class: 'panel' }, 'Ainda não há ninguém no ranking. Entre com sua conta e jogue para ser o primeiro.')
+          : h('section', { class: 'panel' }, h('ol', { class: 'rows' }, boardRows.map((r, i) =>
+            h('li', { class: 'row' + (i === 0 ? ' first' : ''), 'data-key': r.uid },
+              h('span', { class: 'rank' }, i + 1), av(Number.isInteger(r.avatar) ? r.avatar : 0, 48),
+              h('div', { class: 'rname' }, h('span', { class: 'nm' }, String(r.name || '?') + (r.uid === mine ? ' (você)' : '')),
+                h('small', { class: 'hint' }, `Nível ${r.level} · ${r.impWins || 0} vitórias como intruso`)),
+              h('b', { class: 'pts' }, r.xp))))));
+}
 saveProf();
 if (!Profile.unlocked(prof, myAvatar)) myAvatar = 0;
 
@@ -307,6 +358,8 @@ function homeScreen() {
       h('p', { class: 'hint' }, 'Os com cadeado liberam jogando. Toque para ver como.'),
       h('div', {}, h('label', { for: 'nome' }, 'Seu nome'), nameIn)),
     dailyCard(),
+    accountRow(),
+    Cloud.enabled ? h('button', { class: 'btn', type: 'button', 'data-act': 'rank' }, 'Ranking global') : null,
     h('button', { class: 'btn primary', type: 'button', 'data-act': 'create' }, 'Criar sala'),
     h('form', { class: 'form-row', 'data-form': 'join' }, codeIn, h('button', { class: 'btn', type: 'submit' }, 'Entrar')));
 }
@@ -322,6 +375,7 @@ function profileScreen() {
     h('section', { class: 'stats' },
       stat(prof.rounds, 'Rodadas'), stat(prof.wins, 'Vitórias'), stat(prof.impWins, 'Vitórias como intruso'),
       stat(prof.rightVotes, 'Votos certos'), stat(prof.bestStreak, 'Melhor sequência'), stat(prof.matchWins, 'Partidas ganhas')),
+    accountRow(),
     dailyCard(),
     h('section', { class: 'panel' }, h('h2', {}, `Conquistas (${doneCount}/${Profile.ACH.length})`),
       h('ul', { class: 'achs' }, Profile.ACH.map((a) => h('li', { class: 'ach' + (prof.ach[a.id] ? ' on' : ''), 'data-key': a.id },
@@ -577,7 +631,7 @@ function buildHeader() {
 
 function render() {
   morph(document.getElementById('top'), buildHeader());
-  const next = state ? SCREENS[state.phase]() : (tab === 'profile' ? profileScreen() : homeScreen());
+  const next = state ? SCREENS[state.phase]() : (tab === 'profile' ? profileScreen() : tab === 'rank' ? rankScreen() : homeScreen());
   const cur = view.firstElementChild;
   if (!cur || cur.getAttribute('data-screen') !== next.getAttribute('data-screen')) view.replaceChildren(next);
   else { syncAttrs(cur, next); morph(cur, next); }
@@ -660,6 +714,9 @@ const ACT = {
   saveCard,
   sound: () => { Snd.toggle(); render(); },
   profile: () => { tab = 'profile'; window.scrollTo(0, 0); render(); },
+  signIn: () => Cloud.signIn().catch((e) => { if (!/popup-closed|cancelled/.test(String(e && e.code || e))) toast('Não consegui entrar agora.'); }),
+  signOut: () => Cloud.signOut().then(() => toast('Você saiu da conta.', true)),
+  rank: () => { tab = 'rank'; window.scrollTo(0, 0); loadBoard(); },
   home: () => { tab = 'home'; window.scrollTo(0, 0); render(); },
   leave: () => {
     if (state && state.phase !== 'lobby' && state.phase !== 'final' && !confirm('Sair da sala? Você deixa esta partida.')) return;

@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Perfil completo: só o dono lê e escreve.
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['p', 'updated'])
+        && request.resource.data.p is map
+        && request.resource.data.p.xp is number && request.resource.data.p.xp >= 0 && request.resource.data.p.xp < 10000000;
+    }
+    // Resumo público para o ranking: qualquer um lê, só o dono escreve.
+    match /board/{uid} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'avatar', 'xp', 'level', 'title', 'wins', 'impWins', 'matchWins', 'rounds', 'updated'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 14
+        && request.resource.data.avatar is int && request.resource.data.avatar >= 0 && request.resource.data.avatar < 20
+        && request.resource.data.xp is number && request.resource.data.xp >= 0 && request.resource.data.xp < 10000000
+        && request.resource.data.level is number && request.resource.data.level <= 500;
+    }
+  }
+}
