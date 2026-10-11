@@ -40,3 +40,17 @@ Obs.: no plano gratuito o servidor "dorme" após alguns minutos sem uso e a prim
     git commit -m "Intruso: protótipo web"
     git remote add origin https://github.com/SEU-USUARIO/intruso.git
     git push -u origin main
+
+
+## Novidades (v2)
+
+- 11 categorias com 100+ palavras cada (inclui Futebol, Novelas e TV, Comidas regionais, Marcas, Internet e memes); a palavra não repete dentro da sala.
+- O anfitrião escolhe partidas de 5, 10 ou 20 rodadas e os tempos de dica e votação (no lobby e entre as rodadas). Fim de partida com pódio e prêmios.
+- 2 intrusos com 7 ou mais jogadores (a sala precisa pegar os dois).
+- Entrada no meio da partida: a pessoa assiste e joga a partir da próxima rodada.
+- Revelação dos votos com suspense, sons e vibração; reações com emoji na votação.
+- Perfil local (nível, XP, títulos, conquistas, 8 personagens exclusivos, desafio diário). Fica no aparelho: é diversão, não segurança.
+- Compartilhar: WhatsApp, imagem do resultado e QR code da sala.
+
+Testes: `npm test` (palavras, perfil, regras do servidor). Extras: `python3 test/qr_check.py` (QR lido pelo OpenCV) e `python3 test/ui_test.py` (partida completa no Chromium com Playwright).
+Variável de teste: `SEC_MS` escala a duração de 1 segundo do jogo.
