@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14111f">
+<title>Intruso</title>
+<style>
+  :root {
+    --bg: #14111f; --card: #1f1a33; --card2: #2a2345; --text: #f3f0ff; --muted: #a79fc9;
+    --accent: #ff5c8a; --accent2: #7c5cff; --ok: #3ddc97; --bad: #ff5c5c; --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { min-height: 100dvh; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  main { max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 2.6rem; margin: 8px 0 0; letter-spacing: -1px; }
+  h1 span { color: var(--accent); }
+  h2 { font-size: 1.15rem; margin: 0; }
+  p { margin: 0; }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: 4px; }
+  input, select, button { font: inherit; border-radius: 12px; min-height: 48px; }
+  input, select { width: 100%; background: var(--card2); color: var(--text); border: 2px solid transparent; padding: 10px 14px; }
+  input:focus, select:focus, button:focus-visible { outline: 3px solid var(--accent2); outline-offset: 2px; }
+  button { border: 0; padding: 10px 16px; font-weight: 600; cursor: pointer; background: var(--card2); color: var(--text); }
+  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .code { font-size: 2.6rem; font-weight: 800; letter-spacing: .35em; text-align: center; padding-left: .35em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: var(--card2); border-radius: 999px; padding: 6px 12px; font-size: .95rem; }
+  .chip.off { opacity: .45; }
+  .chip.me { outline: 2px solid var(--accent2); }
+  .role { text-align: center; padding: 22px 16px; background: var(--card2); border: 0; width: 100%; color: var(--text); }
+  .role .big { font-size: 2rem; font-weight: 800; display: block; margin-top: 4px; }
+  .role.imp .big { color: var(--bad); }
+  .turn { text-align: center; font-weight: 700; padding: 12px; border-radius: 12px; background: var(--card2); }
+  .turn.mine { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+  li.clue { display: flex; justify-content: space-between; gap: 8px; background: var(--card2); border-radius: 10px; padding: 8px 12px; }
+  li.clue b { font-weight: 600; }
+  .vote { display: flex; justify-content: space-between; align-items: center; text-align: left; }
+  .vote.sel { background: var(--accent2); }
+  .chat { max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: .95rem; }
+  .banner { text-align: center; font-size: 1.4rem; font-weight: 800; padding: 16px; border-radius: var(--radius); }
+  .banner.win { background: rgba(61,220,151,.18); color: var(--ok); }
+  .banner.lose { background: rgba(255,92,92,.18); color: var(--bad); }
+  .score { display: flex; justify-content: space-between; padding: 6px 4px; border-bottom: 1px solid var(--card2); }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); max-width: 448px; margin: 0 auto;
+    background: var(--bad); color: #fff; padding: 12px 16px; border-radius: 12px; font-weight: 600; text-align: center; }
+  #conn { text-align: center; font-size: .85rem; color: var(--muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div id="conn" role="status" hidden>Reconectando…</div>
+  <div id="view"></div>
+</main>
+<div id="toast" role="alert" hidden></div>
+
+<script>
+'use strict';
+const view = document.getElementById('view');
+const toastEl = document.getElementById('toast');
+const connEl = document.getElementById('conn');
+const STORE = 'intruso-sessao';
+let session = null;   // { code, pid }
+let state = null;
+let es = null;
+let secretShown = false;   // o papel fica escondido até a pessoa tocar
+let toastTimer = null;
+
+try { session = JSON.parse(localStorage.getItem(STORE)); } catch { session = null; }
+
+// ---------- helpers ----------
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) el.append(kid instanceof Node ? kid : document.createTextNode(kid == null ? '' : kid));
+  return el;
+}
+
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 3500);
+}
+
+function saveSession(s) {
+  session = s;
+  try { s ? localStorage.setItem(STORE, JSON.stringify(s)) : localStorage.removeItem(STORE); } catch {}
+}
+
+async function api(path, body) {
+  try {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'Algo deu errado.');
+    return j;
+  } catch (e) {
+    toast(e instanceof TypeError ? 'Sem conexão com o servidor.' : e.message);
+    throw e;
+  }
+}
+
+const act = (type, extra) => api('/api/act', { code: session.code, pid: session.pid, type, ...extra }).catch(() => {});
+
+function connect() {
+  if (es) es.close();
+  es = new EventSource(`/api/events?code=${encodeURIComponent(session.code)}&pid=${encodeURIComponent(session.pid)}`);
+  es.onopen = () => { connEl.hidden = true; };
+  es.onmessage = (e) => {
+    const prev = state;
+    state = JSON.parse(e.data);
+    if (!prev || prev.phase === 'lobby' || state.phase === 'lobby') secretShown = false;
+    render();
+  };
+  es.onerror = () => {
+    if (es.readyState === EventSource.CLOSED) {   // servidor recusou: sala não existe mais
+      saveSession(null); state = null; toast('Sala encerrada.'); render();
+    } else {
+      connEl.hidden = false;
+    }
+  };
+}
+
+function leave() {
+  if (es) es.close();
+  saveSession(null); state = null;
+  history.replaceState(null, '', location.pathname);
+  render();
+}
+
+const nameOf = (id) => (state.players.find((p) => p.id === id) || { name: '?' }).name;
+const isHost = () => state.hostId === state.you;
+
+// ---------- telas ----------
+function homeScreen() {
+  const nameIn = h('input', { id: 'nome', maxlength: 14, autocomplete: 'nickname', required: true });
+  const codeIn = h('input', { id: 'codigo', maxlength: 4, autocapitalize: 'characters', autocomplete: 'off', pattern: '[A-Za-z]{4}' });
+  codeIn.value = (new URLSearchParams(location.search).get('sala') || '').toUpperCase().slice(0, 4);
+  try { nameIn.value = localStorage.getItem('intruso-nome') || ''; } catch {}
+
+  const enter = async (path, body) => {
+    const name = nameIn.value.trim();
+    if (!name) { toast('Digite seu nome.'); nameIn.focus(); return; }
+    try { localStorage.setItem('intruso-nome', name); } catch {}
+    try {
+      const r = await api(path, { name, ...body });
+      saveSession({ code: r.code, pid: r.pid });
+      connect();
+    } catch {}
+  };
+
+  return [
+    h('h1', {}, 'Intru', h('span', {}, 'so')),
+    h('p', { class: 'muted' }, 'Todo mundo recebe a mesma palavra… menos o intruso. Descubra quem é!'),
+    h('div', { class: 'card' },
+      h('div', {}, h('label', { for: 'nome' }, 'Seu nome'), nameIn),
+      h('button', { class: 'primary', onclick: () => enter('/api/create', {}) }, 'Criar sala'),
+    ),
+    h('form', { class: 'card', onsubmit: (e) => { e.preventDefault(); enter('/api/join', { code: codeIn.value.trim() }); } },
+      h('div', {}, h('label', { for: 'codigo' }, 'Código da sala'), codeIn),
+      h('button', { type: 'submit' }, 'Entrar na sala'),
+    ),
+  ];
+}
+
+function lobbyScreen() {
+  const s = state;
+  const link = `${location.origin}${location.pathname}?sala=${s.code}`;
+  const sel = h('select', { id: 'cat', disabled: !isHost(), onchange: (e) => act('category', { value: e.target.value }) },
+    s.categories.map((c) => h('option', { value: c, selected: c === s.category }, c)));
+  return [
+    h('div', { class: 'card' },
+      h('p', { class: 'muted' }, 'Código da sala'),
+      h('div', { class: 'code', 'aria-label': 'Código ' + s.code.split('').join(' ') }, s.code),
+      h('button', { onclick: () => {
+        const done = () => toast('Link copiado!');
+        (navigator.share ? navigator.share({ title: 'Intruso', text: 'Entra na minha sala do Intruso!', url: link }).catch(() => {})
+          : navigator.clipboard.writeText(link).then(done, () => toast(link)));
+      } }, 'Convidar amigos'),
+    ),
+    h('div', { class: 'card' },
+      h('h2', {}, `Jogadores (${s.players.length})`),
+      h('div', { class: 'chips' }, s.players.map((p) =>
+        h('span', { class: 'chip' + (p.online ? '' : ' off') + (p.id === s.you ? ' me' : '') }, (p.id === s.hostId ? '👑 ' : '') + p.name))),
+    ),
+    h('div', { class: 'card' },
+      h('div', {}, h('label', { for: 'cat' }, 'Categoria'), sel),
+      isHost()
+        ? h('button', { class: 'primary', disabled: s.players.length < s.minPlayers, onclick: () => act('start') },
+            s.players.length < s.minPlayers ? `Faltam ${s.minPlayers - s.players.length} jogador(es)` : 'Começar partida')
+        : h('p', { class: 'muted' }, `Aguardando ${nameOf(s.hostId)} começar…`),
+    ),
+    h('button', { onclick: leave }, 'Sair da sala'),
+  ];
+}
+
+function roleCard() {
+  const s = state;
+  const imp = s.role === 'impostor';
+  if (!secretShown) {
+    return h('button', { class: 'role', onclick: () => { secretShown = true; render(); } },
+      'Toque para ver seu papel', h('span', { class: 'big' }, '🤫'));
+  }
+  return h('button', { class: 'role' + (imp ? ' imp' : ''), onclick: () => { secretShown = false; render(); }, 'aria-label': 'Toque para esconder' },
+    h('span', { class: 'muted' }, 'Categoria: ' + s.wordCategory),
+    imp
+      ? [h('span', { class: 'big' }, 'Você é o INTRUSO'), h('span', { class: 'muted' }, 'Descubra a palavra sem se entregar')]
+      : [h('span', { class: 'muted' }, 'A palavra é'), h('span', { class: 'big' }, s.word)],
+    h('span', { class: 'muted' }, 'toque para esconder'));
+}
+
+function clueList(s) {
+  if (!s.clues.length) return null;
+  return h('div', { class: 'card' }, h('h2', {}, 'Dicas'),
+    h('ul', {}, s.clues.map((c) => h('li', { class: 'clue' }, h('b', {}, nameOf(c.pid)), h('span', {}, c.text)))));
+}
+
+function cluesScreen() {
+  const s = state;
+  const cur = s.order[s.turn % s.order.length];
+  const mine = cur === s.you;
+  const round = Math.floor(s.turn / s.order.length) + 1;
+  const input = h('input', { id: 'dica', maxlength: 24, autocomplete: 'off', placeholder: 'Uma palavra' });
+  const form = h('form', { class: 'card', onsubmit: (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (text) act('clue', { text });
+  } },
+    h('div', {}, h('label', { for: 'dica' }, 'Sua dica (uma palavra relacionada)'), input),
+    h('button', { class: 'primary', type: 'submit' }, 'Enviar dica'));
+  setTimeout(() => { if (mine && document.activeElement !== input) input.focus(); }, 0);
+  return [
+    roleCard(),
+    h('div', { class: 'turn' + (mine ? ' mine' : ''), role: 'status' },
+      mine ? 'Sua vez!' : `Vez de ${nameOf(cur)}`, h('span', { class: 'muted' }, ` · rodada ${round}/${s.rounds}`)),
+    mine ? form : null,
+    clueList(s),
+  ];
+}
+
+function voteScreen() {
+  const s = state;
+  const chatBox = h('div', { class: 'chat', 'aria-live': 'polite' },
+    s.chat.map((m) => h('p', {}, h('b', {}, nameOf(m.pid) + ': '), m.text)));
+  const msg = h('input', { id: 'msg', maxlength: 120, autocomplete: 'off', placeholder: 'Mensagem', 'aria-label': 'Mensagem para o grupo' });
+  setTimeout(() => { chatBox.scrollTop = chatBox.scrollHeight; }, 0);
+  return [
+    roleCard(),
+    clueList(s),
+    h('div', { class: 'card' }, h('h2', {}, 'Conversem e descubram o intruso'), chatBox,
+      h('form', { class: 'row', onsubmit: (e) => { e.preventDefault(); const text = msg.value.trim(); if (text) { msg.value = ''; act('chat', { text }); } } },
+        msg, h('button', { type: 'submit', style: 'flex:0 0 auto' }, 'Enviar'))),
+    h('div', { class: 'card' },
+      h('h2', {}, `Vote no intruso (${s.voted.length}/${s.players.filter((p) => p.online).length})`),
+      s.players.filter((p) => p.id !== s.you).map((p) =>
+        h('button', { class: 'vote' + (s.myVote === p.id ? ' sel' : ''), onclick: () => act('vote', { target: p.id }) },
+          p.name, s.myVote === p.id ? '✔ seu voto' : ''))),
+  ];
+}
+
+function guessScreen() {
+  const s = state;
+  if (s.role !== 'impostor') {
+    return [h('div', { class: 'card' }, h('h2', {}, `${nameOf(s.accusedId)} foi descoberto!`),
+      h('p', { class: 'muted' }, 'Mas ainda pode tentar adivinhar a palavra e virar o jogo…'))];
+  }
+  const input = h('input', { id: 'palpite', maxlength: 40, autocomplete: 'off' });
+  return [h('form', { class: 'card', onsubmit: (e) => { e.preventDefault(); const text = input.value.trim(); if (text) act('guess', { text }); } },
+    h('h2', {}, 'Você foi descoberto!'),
+    h('p', { class: 'muted' }, 'Categoria: ' + s.wordCategory + '. Acerte a palavra secreta para vencer mesmo assim.'),
+    h('div', {}, h('label', { for: 'palpite' }, 'Seu palpite'), input),
+    h('button', { class: 'primary', type: 'submit' }, 'Chutar'))];
+}
+
+function resultScreen() {
+  const s = state;
+  const r = s.result;
+  const iWon = r.impostorWins === (s.you === s.impostorId);
+  const why = { escaped: 'O intruso escapou da votação.', guessed: 'O intruso foi pego, mas acertou a palavra!', caught: 'O intruso foi pego e errou a palavra.' }[r.reason];
+  const ranking = s.players.slice().sort((a, b) => b.score - a.score);
+  return [
+    h('div', { class: 'banner ' + (iWon ? 'win' : 'lose') }, iWon ? 'Você venceu! 🎉' : 'Você perdeu 😵'),
+    h('div', { class: 'card' },
+      h('p', {}, 'O intruso era ', h('b', {}, nameOf(s.impostorId))),
+      h('p', {}, 'A palavra era ', h('b', {}, s.word)),
+      r.guess ? h('p', {}, 'Palpite do intruso: ', h('b', {}, r.guess)) : null,
+      h('p', { class: 'muted' }, why)),
+    h('div', { class: 'card' }, h('h2', {}, 'Votos'),
+      Object.entries(r.votes).map(([voter, target]) => h('p', {}, `${nameOf(voter)} → ${nameOf(target)}`))),
+    h('div', { class: 'card' }, h('h2', {}, 'Placar'),
+      ranking.map((p) => h('div', { class: 'score' }, h('span', {}, p.name), h('b', {}, p.score)))),
+    isHost() ? h('button', { class: 'primary', onclick: () => act('again') }, 'Jogar de novo')
+             : h('p', { class: 'muted', style: 'text-align:center' }, `Aguardando ${nameOf(s.hostId)}…`),
+    h('button', { onclick: leave }, 'Sair da sala'),
+  ];
+}
+
+function render() {
+  const active = document.activeElement;
+  const keep = active && active.id && active.value !== undefined ? { id: active.id, value: active.value } : null;
+  let nodes;
+  if (!state) nodes = homeScreen();
+  else nodes = { lobby: lobbyScreen, clues: cluesScreen, vote: voteScreen, guess: guessScreen, result: resultScreen }[state.phase]();
+  view.replaceChildren(...nodes.flat().filter(Boolean).map((n) => (n instanceof Node ? n : document.createTextNode(n))));
+  if (keep) {   // não perde o que a pessoa estava digitando quando chega atualização
+    const el = document.getElementById(keep.id);
+    if (el && el.tagName === 'INPUT' && !el.value) { el.value = keep.value; el.focus(); }
+  }
+}
+
+render();
+if (session) connect();
+</script>
+</body>
+</html>
