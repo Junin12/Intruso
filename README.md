@@ -13,14 +13,15 @@ comando de start `node server.js`; a porta vem da variável `PORT`.
 ## Estrutura
 - `server.js`  — salas, regras, tempo real (HTTP + Server-Sent Events)
 - `words.js`   — palavras por categoria (edite à vontade)
-- `public/index.html` — interface (HTML/CSS/JS em um arquivo)
+- `public/index.html` — interface (HTML/CSS/JS em um arquivo; os personagens são SVGs desenhados no próprio arquivo)
 
 ## Regras
-1. Mínimo 3, máximo 10 jogadores. O anfitrião escolhe a categoria e inicia.
-2. Todos veem a palavra; o intruso só vê a categoria.
-3. 2 rodadas de dicas (uma palavra por vez), depois chat e votação.
-4. Intruso pego tem uma chance de adivinhar a palavra.
-5. Pontos: tripulação +1 cada se vencer; intruso +2 se vencer.
+1. Mínimo 3, máximo 10 jogadores. Cada um escolhe um dos 12 personagens (únicos na sala; dá para trocar no lobby). O anfitrião escolhe a categoria e inicia.
+2. No início de cada rodada todos veem o placar por 6 segundos (o anfitrião pode pular). Mude o tempo com a variável `INTRO_MS`.
+3. Todos veem a palavra; o intruso só vê a categoria.
+4. 2 voltas de dicas (uma palavra por vez), depois chat e votação.
+5. Intruso pego tem uma chance de adivinhar a palavra.
+6. Pontos: tripulação +1 cada se vencer; intruso +2 se vencer.
 
 ## Limites conhecidos do protótipo
 Salas ficam na memória (reiniciar o servidor apaga tudo; uma instância só).

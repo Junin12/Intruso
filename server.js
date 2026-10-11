@@ -15,6 +15,8 @@ const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 10;
 const MAX_ROOMS = 500;
 const LOBBY_GRACE_MS = 20000;
+const INTRO_MS = Number(process.env.INTRO_MS) || 6000;   // tempo do placar no início de cada rodada
+const AVATAR_COUNT = 12;                                  // deve bater com a lista AVATARS de public/index.html
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVXZ';
 
 const rooms = new Map();
@@ -47,14 +49,21 @@ class GameError extends Error {}
 const fail = (msg) => { throw new GameError(msg); };
 
 // ---------- modelo ----------
-function makePlayer(name) {
-  return { id: newId(), name, score: 0, res: null, timer: null };
+// Personagem escolhido se estiver livre; senão o primeiro livre (MAX_PLAYERS < AVATAR_COUNT, sempre sobra um).
+function pickAvatar(room, wanted) {
+  const taken = new Set(room ? room.players.map((p) => p.avatar) : []);
+  if (Number.isInteger(wanted) && wanted >= 0 && wanted < AVATAR_COUNT && !taken.has(wanted)) return wanted;
+  return pick([...Array(AVATAR_COUNT).keys()].filter((i) => !taken.has(i)));
+}
+
+function makePlayer(name, avatar) {
+  return { id: newId(), name, avatar, score: 0, res: null, timer: null };
 }
 
 function makeRoom(host) {
   return {
-    code: newCode(), hostId: host.id, players: [host], phase: 'lobby', category: 'Todas',
-    wordCategory: null, word: null, impostorId: null, order: [], turn: 0,
+    code: newCode(), hostId: host.id, players: [host], phase: 'lobby', category: 'Todas', roundNo: 0,
+    wordCategory: null, word: null, impostorId: null, order: [], turn: 0, introUntil: 0, introTimer: null,
     clues: [], votes: {}, chat: [], result: null, lastActive: Date.now(),
   };
 }
@@ -70,10 +79,11 @@ function view(room, pid) {
   const v = {
     code: room.code, you: pid, hostId: room.hostId, phase: room.phase,
     categories: ['Todas', ...Object.keys(WORDS)], category: room.category,
-    minPlayers: MIN_PLAYERS, rounds: ROUNDS,
-    players: room.players.map((p) => ({ id: p.id, name: p.name, score: p.score, online: !!p.res })),
+    minPlayers: MIN_PLAYERS, rounds: ROUNDS, roundNo: room.roundNo,
+    players: room.players.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, score: p.score, online: !!p.res })),
   };
   if (!playing) return v;
+  if (room.phase === 'intro') v.introMs = Math.max(0, room.introUntil - Date.now());
   v.role = isImp ? 'impostor' : 'crew';
   v.wordCategory = room.wordCategory;
   v.word = isImp && !reveal ? null : room.word;
@@ -110,17 +120,32 @@ function startGame(room) {
   room.votes = {};
   room.chat = [];
   room.result = null;
+  room.roundNo++;
+  // Todos veem o placar por alguns segundos antes das dicas começarem.
+  room.phase = 'intro';
+  room.introUntil = Date.now() + INTRO_MS;
+  clearTimeout(room.introTimer);
+  room.introTimer = setTimeout(() => {
+    if (rooms.get(room.code) !== room || room.phase !== 'intro') return;
+    endIntro(room);
+    advance(room);
+    broadcast(room);
+  }, INTRO_MS);
+}
+
+function endIntro(room) {
+  clearTimeout(room.introTimer);
   room.phase = 'clues';
-  advance(room);
 }
 
 function finish(room, reason, guess) {
   const impostorWins = reason !== 'caught';
+  const delta = {};
   for (const p of room.players) {
-    if (impostorWins && p.id === room.impostorId) p.score += 2;
-    if (!impostorWins && p.id !== room.impostorId) p.score += 1;
+    delta[p.id] = impostorWins ? (p.id === room.impostorId ? 2 : 0) : (p.id === room.impostorId ? 0 : 1);
+    p.score += delta[p.id];
   }
-  room.result = { impostorWins, reason, guess: guess || null, votes: { ...room.votes } };
+  room.result = { impostorWins, reason, guess: guess || null, votes: { ...room.votes }, delta };
   room.phase = 'result';
 }
 
@@ -159,10 +184,22 @@ function act(room, player, body) {
       room.category = c;
       break;
     }
+    case 'avatar': {
+      if (room.phase !== 'lobby') fail('Só dá para trocar de personagem no lobby.');
+      const a = body.value;
+      if (!Number.isInteger(a) || a < 0 || a >= AVATAR_COUNT) fail('Personagem inválido.');
+      if (room.players.some((p) => p !== player && p.avatar === a)) fail('Esse personagem já foi escolhido.');
+      player.avatar = a;
+      break;
+    }
     case 'start':
       if (room.phase !== 'lobby' || player.id !== room.hostId) fail('Só o anfitrião inicia a partida.');
       if (room.players.length < MIN_PLAYERS) fail(`São necessários ${MIN_PLAYERS} jogadores.`);
       startGame(room);
+      break;
+    case 'skip':
+      if (room.phase !== 'intro' || player.id !== room.hostId) fail('Só o anfitrião pula o placar.');
+      endIntro(room);
       break;
     case 'clue': {
       if (room.phase !== 'clues') fail('Não é hora de dar dicas.');
@@ -285,7 +322,7 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === '/api/create') {
     if (rooms.size >= MAX_ROOMS) fail('Servidor cheio, tente em instantes.');
-    const player = makePlayer(validName(null, body.name));
+    const player = makePlayer(validName(null, body.name), pickAvatar(null, body.avatar));
     const room = makeRoom(player);
     if (!room.code) fail('Não foi possível criar a sala.');
     rooms.set(room.code, room);
@@ -296,7 +333,7 @@ async function handleApi(req, res, url) {
     if (!room) fail('Sala não encontrada.');
     if (room.phase !== 'lobby') fail('A partida já começou. Aguarde a próxima rodada.');
     if (room.players.length >= MAX_PLAYERS) fail('Sala cheia.');
-    const player = makePlayer(validName(room, body.name));
+    const player = makePlayer(validName(room, body.name), pickAvatar(room, body.avatar));
     room.players.push(player);
     broadcast(room);
     return send(res, 200, { code: room.code, pid: player.id });
