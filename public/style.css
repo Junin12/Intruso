@@ -306,3 +306,7 @@
   .acct { flex-direction: row; align-items: center; gap: 12px; }
   .acct small { display: block; color: var(--muted); font-weight: 600; }
   .acct .btn { width: auto; flex: none; min-height: 46px; }
+  .shoprow { display: flex; align-items: center; gap: 12px; }
+  .shoprow small { display: block; color: var(--muted); font-weight: 600; }
+  .shoprow .btn { width: auto; flex: none; min-height: 46px; padding: 0 14px; }
+  .shoprow .okmark { display: grid; place-items: center; width: 44px; height: 40px; border: 3px solid var(--ink); border-radius: 99px; background: var(--mint); }

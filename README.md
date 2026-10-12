@@ -69,3 +69,8 @@ Como funciona: ao entrar, o perfil da nuvem é mesclado com o do aparelho (maior
 
 Limite conhecido: o cliente grava o próprio XP, então um usuário técnico pode forjar valores (as regras só limitam formato e tamanho). Para um ranking à prova de trapaça, o servidor teria de calcular o XP e gravar com credenciais de administrador.
 Teste da integração com Firebase simulado: `python3 test/cloud_test.py`.
+
+
+## App Android e monetização
+
+Há um projeto Android pronto em `android/` (WebView + AdMob + Google Play Billing) e o material da loja em `play-store/`. Passo a passo: `play-store/PUBLICAR.md`. Monetização: anúncio entre partidas (a cada 2, com intervalo mínimo), anúncio premiado (+30 XP, 3 por dia) e compras únicas (`remove_ads`, `avatar_pack`). Teste da lógica com ponte falsa: `python3 test/monet_test.py`. O projeto Android não foi compilado no ambiente de criação.

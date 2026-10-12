@@ -30,6 +30,25 @@ const saveProf = () => {
   Cloud.pushSoon(() => ({ prof, name: ls.get('intruso-nome') || 'Jogador', avatar: myAvatar }));
 };
 
+// ---------- loja e anúncios (só no app Android) ----------
+function syncPurchases() {
+  if (Monet.owns('avatar_pack') && !prof.pack) { prof.pack = true; saveProf(); }
+}
+Monet.onChange(() => { syncPurchases(); render(); });
+syncPurchases();
+
+function shopSection() {
+  if (!Monet.available) return null;
+  const row = (id, title, desc) => h('div', { class: 'shoprow', 'data-key': id },
+    h('div', { class: 'grow' }, h('b', {}, title), h('small', {}, desc)),
+    Monet.owns(id) ? h('span', { class: 'okmark' }, icon('check'))
+      : h('button', { class: 'btn primary', type: 'button', 'data-act': 'buy', 'data-id': id }, Monet.price(id) || 'Comprar'));
+  return h('section', { class: 'panel' }, h('h2', {}, 'Apoie o jogo'),
+    row('remove_ads', 'Remover anúncios', 'Sem anúncios entre as partidas.'),
+    row('avatar_pack', 'Pacote de personagens', 'Libera já os 8 personagens exclusivos.'),
+    Monet.canReward() ? h('button', { class: 'btn', type: 'button', 'data-act': 'watchAd' }, `Ver anúncio: +${Monet.REWARD_XP} XP (${Monet.rewardsLeft()} hoje)`) : null);
+}
+
 // ---------- conta e ranking (Firebase; só aparece se firebase-config.js estiver preenchido) ----------
 let cloudUser = null, boardRows = null, boardErr = false;
 Cloud.onAuth(async (u) => {
@@ -377,6 +396,7 @@ function profileScreen() {
       stat(prof.rightVotes, 'Votos certos'), stat(prof.bestStreak, 'Melhor sequência'), stat(prof.matchWins, 'Partidas ganhas')),
     accountRow(),
     dailyCard(),
+    shopSection(),
     h('section', { class: 'panel' }, h('h2', {}, `Conquistas (${doneCount}/${Profile.ACH.length})`),
       h('ul', { class: 'achs' }, Profile.ACH.map((a) => h('li', { class: 'ach' + (prof.ach[a.id] ? ' on' : ''), 'data-key': a.id },
         h('span', { class: 'achic' }, prof.ach[a.id] ? icon('check') : icon('lock')),
@@ -607,6 +627,7 @@ function finalScreen() {
         h('span', { class: 'aemoji' }, a.emoji), h('small', {}, a.label), av(a.avatar, 52), h('b', {}, a.name), h('small', {}, a.detail))))) : null,
     h('section', { class: 'panel' }, h('h2', {}, 'Classificação final'), scoreRows(null)),
     gainPanel(matchGain, 'Seu progresso na partida'),
+    shopSection(),
     h('div', { class: 'two' },
       h('button', { class: 'btn wa', type: 'button', 'data-act': 'whatsapp' }, 'WhatsApp'),
       h('button', { class: 'btn', type: 'button', 'data-act': 'saveCard' }, 'Salvar imagem')),
@@ -661,6 +682,7 @@ async function enter(path, body) {
 
 function shareLink() {
   const url = roomUrl();
+  if (state.phase === 'lobby' && Monet.shareText(`Entra na minha sala do Intruso! ${url}`)) return;
   if (navigator.share && state.phase === 'lobby') {
     navigator.share({ title: 'Intruso', text: 'Entra na minha sala do Intruso!', url }).catch(() => {});
   } else if (navigator.clipboard) {
@@ -675,6 +697,10 @@ async function saveCard() {
   try {
     const rows = rankingOf(s).map((r) => r.p);
     const blob = await Share.card({ rows, rounds: s.settings.total, link: baseUrl(), awards: awardList(s).map((a) => ({ label: a.label, name: a.name })) });
+    if (Monet.available) {
+      const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); });
+      if (Monet.shareImage(b64, summaryText(s))) return;
+    }
     const file = new File([blob], 'intruso-resultado.png', { type: 'image/png' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text: summaryText(s) }); return; }
     const a = h('a', { href: URL.createObjectURL(blob), download: 'intruso-resultado.png' });
@@ -705,12 +731,17 @@ const ACT = {
   start: () => { Snd.unlock(); act('start'); },
   skip: () => act('skip'),
   next: () => act('next'),
-  rematch: () => act('rematch'),
+  rematch: () => { act('rematch'); Monet.afterMatch(); },
+  buy: (el) => Monet.buy(el.dataset.id),
+  watchAd: () => Monet.rewarded((xp) => {
+    const g = Profile.bonus(prof, xp); saveProf();
+    toast(`+${xp} XP!` + (g.levelUp ? ` Nível ${g.levelUp}!` : '') + (g.avatars.length ? ' Personagem liberado.' : ''), true); render();
+  }, () => toast('Sem anúncio disponível agora. Tente de novo em instantes.')),
   toggleRole: () => { secretShown = !secretShown; render(); },
   vote: (el) => act('vote', { target: el.dataset.id }),
   react: (el) => act('react', { emoji: el.dataset.e }),
   skipReveal: () => { finishReveal(); render(); },
-  whatsapp: () => window.open(Share.whatsappUrl(summaryText(state)), '_blank', 'noopener'),
+  whatsapp: () => { const u = Share.whatsappUrl(summaryText(state)); if (!Monet.openUrl(u)) window.open(u, '_blank', 'noopener'); },
   saveCard,
   sound: () => { Snd.toggle(); render(); },
   profile: () => { tab = 'profile'; window.scrollTo(0, 0); render(); },
@@ -720,7 +751,9 @@ const ACT = {
   home: () => { tab = 'home'; window.scrollTo(0, 0); render(); },
   leave: () => {
     if (state && state.phase !== 'lobby' && state.phase !== 'final' && !confirm('Sair da sala? Você deixa esta partida.')) return;
+    const wasFinal = state && state.phase === 'final';
     leave();
+    if (wasFinal) Monet.afterMatch();
   },
 };
 

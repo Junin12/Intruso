@@ -4,7 +4,8 @@
 const Cloud = (() => {
   const V = '10.12.2', BASE = `https://www.gstatic.com/firebasejs/${V}/`;
   const cfg = window.FIREBASE_CONFIG;
-  const enabled = !!(cfg && cfg.apiKey && cfg.projectId);
+  // O login do Google não funciona dentro de WebView (o Google bloqueia); no app Android a conta fica desligada.
+  const enabled = !!(cfg && cfg.apiKey && cfg.projectId) && !window.AndroidApp;
   let fb = null, user = null, listeners = [], timer = null;
 
   async function sdk() {

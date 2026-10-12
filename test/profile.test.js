@@ -34,4 +34,9 @@ t('merge junta aparelho e nuvem sem perder nada', () => {
   assert.strictEqual(m.xp, 500); assert.strictEqual(m.impWins, 4); assert.ok(m.ach.win); assert.strictEqual(m.ach.first, '2026-09-20');
   assert.strictEqual(m.streak, 2); assert.strictEqual(m.lastDay, '2026-10-11');
 });
+t('pacote de personagens libera os exclusivos; bônus de XP sobe de nível', () => {
+  const p = P.blank(); assert.ok(!P.unlocked(p, 15)); p.pack = true; assert.ok(P.unlocked(p, 12) && P.unlocked(p, 19));
+  const q = P.blank(); q.xp = 95; const r = P.bonus(q, 30); assert.strictEqual(r.levelUp, 2); assert.strictEqual(q.xp, 125);
+  assert.strictEqual(P.merge(P.blank(), p).pack, true);
+});
 console.log(n + ' ok');

@@ -14,7 +14,7 @@ const Profile = (() => {
   }
 
   const blank = () => ({
-    v: 1, xp: 0, rounds: 0, wins: 0, impRounds: 0, impWins: 0, rightVotes: 0, wordGuesses: 0, duoWins: 0,
+    v: 1, pack: false, xp: 0, rounds: 0, wins: 0, impRounds: 0, impWins: 0, rightVotes: 0, wordGuesses: 0, duoWins: 0,
     matches: 0, matchWins: 0, streak: 0, bestStreak: 0, dailyDone: 0, days: 0, lastDay: '', ach: {}, daily: null,
   });
 
@@ -139,6 +139,7 @@ const Profile = (() => {
     for (const k of ['xp', 'rounds', 'wins', 'impRounds', 'impWins', 'rightVotes', 'wordGuesses', 'duoWins', 'matches', 'matchWins', 'bestStreak', 'dailyDone', 'days']) {
       out[k] = Math.max(Number(a[k]) || 0, Number(b[k]) || 0);
     }
+    out.pack = !!(a.pack || b.pack);
     out.ach = Object.assign({}, b.ach, a.ach);
     for (const id of Object.keys(b.ach || {})) if (a.ach && a.ach[id] && b.ach[id] < a.ach[id]) out.ach[id] = b.ach[id];
     out.lastDay = [a.lastDay, b.lastDay].filter(Boolean).sort().pop() || '';
@@ -150,8 +151,16 @@ const Profile = (() => {
     return out;
   }
 
-  const unlocked = (p, i) => i < 12 || UNLOCKS.some((u) => u.i === i && u.test(p));
+  // XP extra (ex.: anúncio com recompensa). Pode subir de nível e liberar conquistas.
+  function bonus(p, xp, today = dayKey()) {
+    touch(p, today);
+    const before = snapshot(p);
+    p.xp += xp;
+    return finalize(p, before, xp, today);
+  }
 
-  return { merge, blank, levelInfo, onRound, onMatch, touch, dailyFor, dayKey, unlocked, ACH, UNLOCKS, DAILY, XP, TITLES };
+  const unlocked = (p, i) => i < 12 || !!p.pack || UNLOCKS.some((u) => u.i === i && u.test(p));
+
+  return { bonus, merge, blank, levelInfo, onRound, onMatch, touch, dailyFor, dayKey, unlocked, ACH, UNLOCKS, DAILY, XP, TITLES };
 })();
 if (typeof module !== 'undefined') module.exports = Profile;
