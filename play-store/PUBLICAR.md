@@ -53,3 +53,13 @@ As compras só funcionam em app enviado ao Play (teste interno serve) e com cont
 - As compras são conferidas só no aparelho (sem validação no servidor). Aceitável para compra de baixo valor e personagens, mas quem tem celular com root pode forjar. Para blindar, valide o token da compra no servidor com a API do Google Play.
 - O XP e o perfil são locais, então o ranking global (quando existir) pode ser forjado (ver README).
 - Os valores de versões (AGP, Kotlin, AdMob, Billing) e o `targetSdk` mudam com o tempo; o Android Studio avisa quando houver atualização obrigatória.
+
+## Alternativa ao Render: Google Cloud Run
+Com o crédito do teste gratuito do Google Cloud dá para hospedar o servidor no Cloud Run. Na pasta do projeto (com o `gcloud` instalado e logado):
+
+    gcloud run deploy intruso --source . --region southamerica-east1 --allow-unauthenticated \
+      --min-instances 1 --max-instances 1 --concurrency 250 --timeout 3600 --no-cpu-throttling
+
+- `min-instances 1`: nunca "dorme". `max-instances 1`: as salas ficam na memória, então precisa ser uma instância só.
+- `timeout 3600`: as conexões em tempo real duram até 1 h; o jogo reconecta sozinho.
+- Ao final o comando mostra o endereço (`https://intruso-...run.app`): use em `GAME_URL`.
