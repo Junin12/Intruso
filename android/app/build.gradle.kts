@@ -10,12 +10,12 @@ val keystoreFile = rootProject.file("keystore.properties")
 
 android {
     namespace = "br.com.intruso.jogo"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "br.com.intruso.jogo"
         minSdk = 24
-        targetSdk = 35          // confira no Play Console o nível mínimo exigido na data da publicação
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
         buildConfigField("String", "GAME_URL", "\"${prop("GAME_URL", "https://SEU-SERVIDOR.onrender.com/")}\"")
@@ -57,5 +57,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.gms:play-services-ads:23.5.0")
-    implementation("com.android.billingclient:billing-ktx:7.1.1")
+    implementation("com.android.billingclient:billing-ktx:8.3.0")
 }

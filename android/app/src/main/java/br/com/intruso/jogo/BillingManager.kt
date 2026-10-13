@@ -43,8 +43,8 @@ class BillingManager(private val act: Activity, private val emit: (JSONObject) -
         val products = IDS.map {
             QueryProductDetailsParams.Product.newBuilder().setProductId(it).setProductType(BillingClient.ProductType.INAPP).build()
         }
-        client.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(products).build()) { _, list ->
-            details = list.associateBy { it.productId }
+        client.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(products).build()) { _, result ->
+            details = result.productDetailsList.associateBy { it.productId }
             val prices = JSONObject()
             details.forEach { (id, d) -> d.oneTimePurchaseOfferDetails?.let { prices.put(id, it.formattedPrice) } }
             emit(JSONObject().put("type", "prices").put("prices", prices))
