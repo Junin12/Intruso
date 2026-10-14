@@ -742,6 +742,8 @@ canvas.qr{display:block;width:min(260px,100%);height:auto;image-rendering:pixela
           <select id="f-emp" aria-label="Empreendimento"></select>
           <select id="f-pr" aria-label="Prancha"></select>
           <select id="f-loc" aria-label="Local ou elemento"></select>
+          <select id="f-obra" aria-label="Aço em obra"><option value="">Aço: em obra ou não</option><option value="tudo">Aço em obra (100%)</option>
+            <option value="parte">Aço chegou em parte</option><option value="nao">Aço não chegou</option></select>
           <label class="chk"><input type="checkbox" id="f-pend"> Esconder concluídas</label>
           <div class="modo" role="group" aria-label="Unidade do lançamento"><span class="info">Lançar em</span>
             <button class="chipbtn" type="button" data-m="pct">% da posição</button><button class="chipbtn" type="button" data-m="bar">barras</button></div>
@@ -1428,7 +1430,10 @@ function renderResumo(){
 }
 
 // ---------- coleta ----------
-const F = Object.assign({emp:"",est:"",pr:"",loc:"",q:"",pend:false}, LS.get("filtros")||{});
+const F = Object.assign({emp:"",est:"",pr:"",loc:"",q:"",pend:false,obra:""}, LS.get("filtros")||{});
+// filtro "aço em obra": tudo = chegou 100%, parte = chegou em parte, nao = não chegou
+const situacaoObra = i => { const ch=barrasNaObra().get(i.c)||0; return ch>0 && ch>=i.qp*0.999 ? "tudo" : ch>0 ? "parte" : "nao"; };
+const ROT_OBRA={tudo:"aço em obra", parte:"aço chegou em parte", nao:"aço não chegou"};
 function opts(sel, values, allLabel, val){
   sel.replaceChildren(el("option",{value:"",text:allLabel}), ...values.map(v=>el("option",{value:v,text:v})));
   sel.value = values.includes(val) ? val : "";
@@ -1443,10 +1448,10 @@ function renderFiltros(){
   F.pr = opts($("#f-pr"), uniq(b.map(i=>i.pr)), "Todas as pranchas", F.pr);
   const c = b.filter(i=>!F.pr||i.pr===F.pr);
   F.loc = opts($("#f-loc"), uniq(c.map(i=>i.loc).filter(Boolean)), "Todos os locais / elementos", F.loc);
-  $("#f-busca").value=F.q; $("#f-pend").checked=F.pend;
+  $("#f-busca").value=F.q; $("#f-pend").checked=F.pend; $("#f-obra").value=F.obra||"";
   // um empreendimento só: não precisa do filtro
   $("#f-emp").hidden = $("#f-emp").options.length<=2 && !F.emp;
-  const nMais=[F.emp,F.pr,F.loc,F.pend].filter(Boolean).length;
+  const nMais=[F.emp,F.pr,F.loc,F.pend,F.obra].filter(Boolean).length;
   $("#f-mais-tit").textContent = "Mais filtros" + (nMais ? ` (${nMais})` : "") + ` · lançar em ${S.modo==="bar"?"barras":"%"}`;
   if(nMais) $("#f-mais").open=true;
   const eqs=eqAtivas(), s=$("#f-eq");
@@ -1458,13 +1463,14 @@ function filtered(){
   const q=F.q.trim().toLowerCase();
   return S.items.filter(i=> (!F.emp||i.emp===F.emp) && (!F.est||i.est===F.est) && (!F.pr||i.pr===F.pr) && (!F.loc||i.loc===F.loc)
     && (!F.pend || (S.acum.get(i.c)||0) < i.qp)
+    && (!F.obra || situacaoObra(i)===F.obra)
     && (!q || [i.pos,i.c,i.loc,i.pr,i.it,i.tp,String(i.bit)].some(x=>String(x).toLowerCase().includes(q))));
 }
 function onFiltro(){
-  F.emp=$("#f-emp").value; F.est=$("#f-est").value; F.pr=$("#f-pr").value; F.loc=$("#f-loc").value; F.q=$("#f-busca").value; F.pend=$("#f-pend").checked;
+  F.emp=$("#f-emp").value; F.est=$("#f-est").value; F.pr=$("#f-pr").value; F.loc=$("#f-loc").value; F.q=$("#f-busca").value; F.pend=$("#f-pend").checked; F.obra=$("#f-obra").value;
   LS.set("filtros",F); S.limit=60; renderFiltros(); renderLista();
 }
-["#f-emp","#f-est","#f-pr","#f-loc","#f-pend"].forEach(s=>$(s).addEventListener("change",onFiltro));
+["#f-emp","#f-est","#f-pr","#f-loc","#f-pend","#f-obra"].forEach(s=>$(s).addEventListener("change",onFiltro));
 let buscaT; $("#f-busca").addEventListener("input",()=>{ clearTimeout(buscaT); buscaT=setTimeout(onFiltro,250); });
 $("#mais").addEventListener("click",()=>{ S.limit+=60; renderLista(); });
 
@@ -1483,7 +1489,7 @@ renderModo();
 function buildRow(i){
   const inp = el("input",{type:"text",inputMode:"decimal",autocomplete:"off",id:"q-"+i.c});
   const card = el("article",{class:"item","data-c":i.c},
-    el("div",{class:"i-top"}, el("span",{class:"pos",text:i.pos}), el("span",{class:"bit",text:bitLabel(i.bit)}), el("span",{class:"loc",text:i.loc}), el("span",{class:"chip"})),
+    el("div",{class:"i-top"}, el("span",{class:"pos",text:i.pos}), el("span",{class:"bit",text:bitLabel(i.bit)}), el("span",{class:"loc",text:i.loc}), el("span",{class:"chip obra"}), el("span",{class:"chip st"})),
     el("div",{class:"i-sub",text:`${i.est} · ${i.pr.replace(/^.*?-DE-/,"DE-")} · item ${i.it} · ${i.tp} · ${i.c}`,title:i.pr}),
     el("div",{class:"i-prog"}, el("div",{class:"bar"},el("i")), el("span",{class:"acc"})),
     el("div",{class:"i-in"},
@@ -1498,7 +1504,9 @@ function buildRow(i){
 function fillRow(card,i){
   const {wq,ac,max}=rowNums(i), [st,cls]=statusOf(ac,i.qp);
   card.classList.toggle("done", ac>=i.qp && i.qp>0);
-  const chip=card.querySelector(".chip"); chip.textContent=st; chip.className="chip "+cls;
+  const chip=card.querySelector(".chip.st"); chip.textContent=st; chip.className="chip st "+cls;
+  // aço em obra: chegou 100%, chegou em parte (%) ou não chegou
+  const [ot,oc,od]=etiquetaObra(i), ob=card.querySelector(".chip.obra"); ob.textContent=ot; ob.className="chip obra "+oc; ob.title=od; ob.setAttribute("aria-label",`Aço: ${ot}. ${od}`);
   card.querySelector(".bar i").style.width = (i.qp? Math.min(100,ac/i.qp*100):0)+"%";
   const P=emPct(i), emU = q => P ? nfp.format(q/i.qp*100) : nf0.format(q);
   card.querySelector(".acc").textContent = `${nf0.format(ac)} / ${nf0.format(i.qp)} barras (${i.qp?nfp.format(ac/i.qp*100):0}%) · ${nf0.format(i.kp)} kg`;
@@ -1532,15 +1540,16 @@ function renderLista(){
 }
 function renderInfo(f=filtered()){
   const kp=f.reduce((s,i)=>s+i.kp,0), ke=f.reduce((s,i)=>s+Math.min(S.acum.get(i.c)||0,i.qp)*i.ppb,0);
+  const ob=barrasNaObra(), ko=f.reduce((s,i)=>s+(ob.get(i.c)||0)*i.ppb,0); // aço que já chegou à obra
   // deixa claro quando os números são só de uma parte da obra
-  const filtro=[F.emp, F.est, F.pr, F.loc, F.q.trim()&&`"${F.q.trim()}"`, F.pend&&"sem concluídas"].filter(Boolean);
+  const filtro=[F.emp, F.est, F.pr, F.loc, F.q.trim()&&`"${F.q.trim()}"`, F.pend&&"sem concluídas", F.obra&&ROT_OBRA[F.obra]].filter(Boolean);
   const box=$("#lista-info");
   box.replaceChildren(
     el("b",{text: filtro.length ? `Filtro: ${filtro.join(" · ")}` : "Obra inteira"}), " — ",
-    `${nf0.format(f.length)} posições · previsto ${t(kp)} t · executado ${t(ke)} t (${pct(kp?ke/kp:0)})`);
+    `${nf0.format(f.length)} posições · previsto ${t(kp)} t · em obra ${t(ko)} t (${pct(kp?ko/kp:0)}) · executado ${t(ke)} t (${pct(kp?ke/kp:0)})`);
   if(filtro.length){
     const b=el("button",{class:"linkbtn",type:"button",text:"Limpar filtros"});
-    b.onclick=()=>{ Object.assign(F,{emp:"",est:"",pr:"",loc:"",q:"",pend:false}); LS.set("filtros",F); S.limit=60; renderFiltros(); renderLista(); };
+    b.onclick=()=>{ Object.assign(F,{emp:"",est:"",pr:"",loc:"",q:"",pend:false,obra:""}); LS.set("filtros",F); S.limit=60; renderFiltros(); renderLista(); };
     box.append(" ", b);
   }
 }
@@ -1852,7 +1861,7 @@ $("#tema").addEventListener("click", e=>{ const b=e.target.closest("button[data-
   renderTema(); });
 renderTema();
 
-const VERSAO_APP = "v81"; // igual ao número em sw.js (armacao-v81)
+const VERSAO_APP = "v82"; // igual ao número em sw.js (armacao-v82)
 $("#versao-app").textContent = VERSAO_APP;
 $("#buscar-versao").addEventListener("click", async ()=>{
   const m=$("#versao-msg");
@@ -4144,6 +4153,47 @@ function barrasPedidas(){
   for(const [n,txt] of Object.entries(ITENS_REMESSA)) for(const s of txt.split(" ")){ const [c,q]=s.split(":"); add(c, q ? Number(q) : (S.byCode.get(c)?.qp||0), Number(n)); }
   for(const p of pedidosApp()) for(const [c,q] of Object.entries(p.itens)) add(c, Number(q)||0, p.n);
   m.origem=origem; return m;
+}
+// ---------- aço em obra: barras que já chegaram, pelos romaneios com chegada confirmada (Suprimentos › Aço) ----------
+// Remessa recebida inteira: todas as barras pedidas nela. Remessa parcial: as OS dos romaneios que chegaram são ligadas às
+// posições da remessa por posição + bitola + comprimento (peças emendadas "1" + "1." somadas); sem par no comprimento
+// (revisão do projeto), por posição + bitola. Remessa ainda não recebida: nada em obra.
+function pedidasPorRemessa(){
+  const m=new Map(), add=(n,c,q)=>{ if(!(q>0) || !S.byCode.has(c)) return; const r=m.get(n)||m.set(n,new Map()).get(n); r.set(c,(r.get(c)||0)+q); };
+  for(const i of S.items) if(i.ped==="1"||i.ped==="2") add(Number(i.ped), i.c, i.qp);
+  for(const [n,txt] of Object.entries(ITENS_REMESSA)) for(const s of txt.split(" ")){ const [c,q]=s.split(":"); add(Number(n), c, q ? Number(q) : (S.byCode.get(c)?.qp||0)); }
+  for(const p of pedidosApp()) for(const [c,q] of Object.entries(p.itens)) add(p.n, c, Number(q)||0);
+  return m;
+}
+// OS do romaneio com as peças emendadas juntas: [posição "N1", bitola, barras, comprimento em cm]
+function osJuntas(oss){
+  const out=[];
+  for(let k=0;k<oss.length;k++){ const o=oss[k], prox=oss[k+1]; let comp=+o[5];
+    if(prox && String(prox[2])===String(o[2])+"." && +prox[4]===+o[4]){ comp+=+prox[5]; k++; }
+    out.push(["N"+String(o[2]).replace(/\.$/,""), +o[3], +o[4], comp]); }
+  return out;
+}
+const barrasNaObra = () => memoEf("naObra", ()=>{
+  const out=new Map(), porRem=pedidasPorRemessa();
+  const soma=(c,q)=>{ const i=S.byCode.get(c); if(i && q>0) out.set(c, Math.min(i.qp,(out.get(c)||0)+q)); };
+  for(const R of remessas()){
+    const cods=porRem.get(R.n); if(!cods) continue;
+    if(R.rec){ for(const [c,q] of cods) soma(c,q); continue; }
+    if(!R.nRomRec || !CF.lista) continue;
+    const resto=new Map(cods);
+    const alocar=(o, comComp)=>{ for(const [c,rq] of resto){ if(!(rq>0) || !(o[2]>0)) continue; const i=S.byCode.get(c);
+      if(posNorm(i.pos)!==o[0] || +i.bit!==o[1] || (comComp && Math.abs(i.cu*100-o[3])>3)) continue;
+      const n=Math.min(o[2],rq); soma(c,n); resto.set(c,rq-n); o[2]-=n; } };
+    for(const x of R.roms.filter(x=>x.rec)) for(const [,oss] of CF.lista[x.n]||[]) for(const o of osJuntas(oss)){ alocar(o,true); alocar(o,false); }
+  }
+  return out;
+});
+// etiqueta da posição na Coleta: [texto, classe do chip, explicação]
+function etiquetaObra(i){
+  const ch=barrasNaObra().get(i.c)||0, pc=i.qp ? ch/i.qp : 0, ped=memoEf("pedidas", barrasPedidas).get(i.c)||0;
+  if(ch>0 && pc>=0.999) return ["Em obra · 100%","ok",`Todas as ${nf0.format(i.qp)} barras já chegaram`];
+  if(ch>0) return [`Em obra · ${Math.floor(pc*100)}%`,"and",`${nf0.format(ch)} de ${nf0.format(i.qp)} barras já chegaram`];
+  return ["Não chegou","bad", ped ? `Pedido (${nf0.format(ped)} barras), aguardando a entrega` : "Ainda não pedido"];
 }
 // estrutura conta como toda pedida quando o que falta é menos de 1% (ou 100 kg): são emendas e cortes que o
 // fornecedor dividiu diferente do projeto (ex.: Elevatória AT, 236 kg em 6 posições de 74,8 t)
@@ -7557,6 +7607,8 @@ function renderRelatorios(box){
   const cached=LS.get("base"); if(cached?.itens) setBase(cached.meta, cached.itens);
   lerLinkCfg();
   afterData(); renderData(); show(LS.get("aba")||"coleta");
+  // OS dos romaneios: a etiqueta "Em obra" de uma remessa que chegou só em parte depende delas
+  carregarOsRom().then(()=>{ if(S.items.length && remessas().some(R=>!R.rec && R.nRomRec)) renderLista(); }).catch(()=>{});
   if(S.cfg?.url){ sync(); carregarProjetos().catch(()=>{}); }
   if("serviceWorker" in navigator){
     // quando chega uma versão nova do app, recarrega uma vez para já usá-la
