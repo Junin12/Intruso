@@ -12,7 +12,8 @@ comando de start `node server.js`; a porta vem da variável `PORT`.
 
 ## Estrutura
 - `server.js`  — salas, regras, tempo real (HTTP + Server-Sent Events)
-- `words.js`   — palavras por categoria (edite à vontade)
+- `words.js`   — palavras por categoria (edite à vontade; 150 por categoria)
+- `pairs.js`   — pares do modo palavra parecida
 - `public/index.html` — interface (HTML/CSS/JS em um arquivo; os personagens são SVGs desenhados no próprio arquivo)
 
 ## Regras
@@ -22,6 +23,10 @@ comando de start `node server.js`; a porta vem da variável `PORT`.
 4. 2 voltas de dicas (uma palavra por vez), depois chat e votação.
 5. Intruso pego tem uma chance de adivinhar a palavra.
 6. Pontos: tripulação +1 cada se vencer; intruso +2 se vencer. Se o intruso escapar da votação, quem votou nele mesmo assim ganha +1.
+7. Modo **palavra parecida** (ajuste do lobby): o intruso recebe uma palavra próxima da turma (pares em `pairs.js`) e se vê como tripulante até ser descoberto.
+8. **Cúmplice** (ajuste do lobby, 6+ jogadores): sabe a palavra e quem é o intruso; ganha +2 junto com o intruso e não leva o +1 do voto certo.
+9. Categoria **Personalizada**: o anfitrião digita de 6 a 60 palavras; só ele vê a lista.
+10. **Jogar em 1 celular** (tela inicial): a partida roda toda no aparelho (`public/local.js`), passando de mão em mão; dicas e votação em voz alta.
 
 ## Limites conhecidos do protótipo
 Salas ficam na memória (reiniciar o servidor apaga tudo; uma instância só).

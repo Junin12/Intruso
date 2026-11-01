@@ -310,3 +310,18 @@
   .shoprow small { display: block; color: var(--muted); font-weight: 600; }
   .shoprow .btn { width: auto; flex: none; min-height: 46px; padding: 0 14px; }
   .shoprow .okmark { display: grid; place-items: center; width: 44px; height: 40px; border: 3px solid var(--ink); border-radius: 99px; background: var(--mint); }
+  /* cúmplice, roleta da revelação, lista personalizada e modo 1 celular */
+  .role.acc { background: var(--sun); }
+  .tally.spin { gap: 18px 8px; }
+  .tally.spin .tcell { gap: 10px; }
+  .tcell.spot .av { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--ink); }
+  .tcell.spot.landed .av { background-color: var(--coral) !important; animation: beat .4s ease-in-out 3 alternate; }
+  .acc-line { display: flex; align-items: center; gap: 8px; }
+  .acc-line .av { --s: 34px; border-width: 2px; animation: none; }
+  textarea { width: 100%; padding: 12px 16px; border: 3px solid var(--ink); border-radius: 14px; background: #fff; color: var(--ink);
+    font: 700 1rem/1.4 var(--body); resize: vertical; }
+  textarea:focus { outline: none; box-shadow: 0 0 0 4px var(--sun); }
+  .hint.light { color: rgba(255, 255, 255, .85); text-align: center; margin-top: -6px; }
+  .ldel { display: grid; place-items: center; width: 28px; height: 28px; margin-left: 2px; padding: 0; border: 2px solid var(--ink);
+    border-radius: 50%; background: var(--tint); color: var(--ink); font: 800 1.1rem/1 var(--body); cursor: pointer; }
+  .local .role.hid .av { --s: 64px; }

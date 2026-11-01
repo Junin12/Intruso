@@ -74,6 +74,50 @@ const imps = (ps) => ps.filter((p) => p.v.role === 'impostor');
     assert.deepStrictEqual([sc(imp), sc(a), sc(b), sc(c), sc(d)], [2, 1, 1, 0, 0]);
   });
 
+  await test('palavra parecida: intruso recebe outra palavra e se vê como tripulante', async () => {
+    const ps = await room(4); await ps[0].act({ type: 'settings', key: 'mode', value: 1 }); await toVote(ps);
+    assert.ok(ps.every((p) => p.v.role === 'crew' && p.v.word && p.v.similar));
+    const words = ps.map((p) => p.v.word);
+    const imp = ps.find((p) => words.filter((w) => w === p.v.word).length === 1);
+    assert.ok(imp, 'um jogador com palavra diferente');
+    const crewWord = ps.find((p) => p !== imp).v.word;
+    for (const p of ps) await p.act({ type: 'vote', target: p === imp ? ps.find((x) => x !== imp).pid : imp.pid });
+    await sleep(20); assert.strictEqual(ps[0].v.phase, 'guess');
+    assert.strictEqual(imp.v.role, 'impostor'); assert.strictEqual(imp.v.word, null);
+    await imp.act({ type: 'guess', text: crewWord }); await sleep(20);
+    assert.strictEqual(ps[0].v.result.reason, 'guessed');
+    assert.strictEqual(ps[0].v.word, crewWord); assert.ok(ps[0].v.altWord && ps[0].v.altWord !== crewWord);
+  });
+
+  await test('cúmplice: sabe quem é o intruso e vence junto', async () => {
+    const ps = await room(6); await ps[0].act({ type: 'settings', key: 'accomplice', value: 1 }); await toVote(ps);
+    const imp = imps(ps)[0], acc = ps.find((p) => p.v.role === 'accomplice');
+    assert.ok(acc, 'tem cúmplice'); assert.deepStrictEqual(acc.v.knownImpostors, [imp.pid]); assert.ok(acc.v.word);
+    assert.strictEqual(imp.v.knownImpostors, undefined);
+    const others = ps.filter((p) => p !== imp && p !== acc);
+    for (const p of [imp, ...others]) await p.act({ type: 'vote', target: acc.pid });
+    await acc.act({ type: 'vote', target: others[0].pid }); await sleep(20);
+    assert.strictEqual(ps[0].v.result.reason, 'escaped'); assert.strictEqual(ps[0].v.accompliceId, acc.pid);
+    const sc = (p) => ps[0].v.players.find((x) => x.id === p.pid).score;
+    assert.deepStrictEqual([sc(imp), sc(acc), ...others.map(sc)], [2, 2, 0, 0, 0, 0]);
+    const few = await room(5); await few[0].act({ type: 'settings', key: 'accomplice', value: 1 }); await few[0].act({ type: 'start' }); await sleep(20);
+    assert.ok(few.every((p) => p.v.role !== 'accomplice'), 'com 5 jogadores não tem cúmplice');
+  });
+
+  await test('lista personalizada: só o anfitrião, mínimo para começar, palavra vem da lista', async () => {
+    const ps = await room(3);
+    assert.strictEqual((await ps[1].act({ type: 'customWords', words: 'a,b' })).s, 400);
+    await ps[0].act({ type: 'category', value: 'Personalizada' });
+    await ps[0].act({ type: 'customWords', words: 'Fusca azul, Churrasco do Zé' + String.fromCharCode(10) + 'Reunião, reunião' });
+    await sleep(20); assert.strictEqual(ps[1].v.customCount, 3); assert.strictEqual(ps[1].v.customWords, undefined);
+    assert.strictEqual((await ps[0].act({ type: 'start' })).s, 400);
+    const list = ['Fusca azul', 'Churrasco do Zé', 'Reunião', 'Café da firma', 'Planilha', 'Crachá'];
+    await ps[0].act({ type: 'customWords', words: list.join(',') });
+    assert.ok((await ps[0].act({ type: 'start' })).ok); await sleep(20);
+    const crew = ps.find((p) => p.v.role === 'crew');
+    assert.ok(list.includes(crew.v.word)); assert.strictEqual(crew.v.wordCategory, 'Personalizada');
+  });
+
   await test('dois intrusos: precisa pegar os dois', async () => {
     const ps = await room(7); await toVote(ps);
     const [a, b] = imps(ps); const inn = ps.filter((p) => p !== a && p !== b);

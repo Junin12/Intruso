@@ -210,20 +210,44 @@ function stepReveal() {
   rv.stage++;
   const { n } = rv;
   if (rv.stage <= n) { Snd.tick(rv.stage); rv.timer = setTimeout(stepReveal, 1000); }
-  else if (rv.stage === n + 1) { Snd.drum(); rv.timer = setTimeout(stepReveal, 2300); }
+  else if (rv.stage === n + 1) { Snd.drum(); startSpin(); }
   else finishReveal();
   render();
+}
+
+// Roleta: o destaque passa pelos jogadores, desacelera e para em cima do intruso.
+function startSpin() {
+  const s = state, ids = s.players.filter((p) => !p.waiting).map((p) => p.id);
+  const target = Math.max(0, ids.indexOf(s.impostorIds[0]));
+  const steps = ids.length * 2 + target + (ids.length < 4 ? ids.length : 0);
+  rv.spinIds = ids; rv.spin = 0; rv.landed = false;
+  const tick = () => {
+    if (!rv || rv.done || !state || state.phase !== 'result') return;
+    if (rv.spin >= steps) { rv.landed = true; Snd.alarm(); render(); rv.timer = setTimeout(stepReveal, 1100); return; }
+    rv.spin++;
+    Snd.tick(rv.spin % 6);
+    render();
+    const t = rv.spin / steps;
+    rv.timer = setTimeout(tick, 70 + 330 * t * t);
+  };
+  rv.timer = setTimeout(tick, 500);
 }
 
 function finishReveal() {
   if (!rv || rv.done) return;
   clearTimeout(rv.timer);
   rv.done = true; rv.stage = rv.n + 2;
-  const s = state, wasImp = s.impostorIds.includes(s.you);
-  const iWon = s.role !== 'spectator' && s.result.impostorWins === wasImp;
+  const s = state;
+  const iWon = s.role !== 'spectator' && wonRound(s);
   if (s.role === 'spectator') Snd.pop();
   else if (iWon) { Snd.win(); burst(); } else Snd.lose();
   if (roundGain && roundGain.levelUp) setTimeout(() => Snd.fanfare(), 900);
+}
+
+// O cúmplice vence junto com o intruso.
+function wonRound(s) {
+  const wasImp = s.impostorIds.includes(s.you) || s.accompliceId === s.you;
+  return s.result.impostorWins === wasImp;
 }
 
 function creditRound(s) {
@@ -232,7 +256,7 @@ function creditRound(s) {
   ls.set('intruso-ult', key);
   const r = s.result, wasImp = s.impostorIds.includes(s.you);
   const g = Profile.onRound(prof, {
-    won: r.impostorWins === wasImp, wasImp, duo: s.impostorCount === 2,
+    won: wonRound(s), wasImp, duo: s.impostorCount === 2,
     votedRight: !!r.votes[s.you] && s.impostorIds.includes(r.votes[s.you]), guessed: wasImp && r.reason === 'guessed',
   });
   saveProf();
@@ -336,8 +360,16 @@ function settingRow(label, key, values, current, fmt, editable) {
 
 function settingsPanel(withTotal) {
   const s = state, ed = isHost(), o = s.options;
+  const few = s.players.length < s.accompliceFrom;
   return h('div', { class: 'stack' },
     withTotal ? settingRow('Tamanho da partida', 'total', o.total, s.settings.total, (v) => `${v} rodadas`, ed) : null,
+    withTotal ? settingRow('Modo de jogo', 'mode', o.mode, s.settings.mode, (v) => (v ? 'Palavra parecida' : 'Clássico'), ed) : null,
+    withTotal ? h('p', { class: 'hint' }, s.settings.mode
+      ? 'O intruso recebe uma palavra parecida, não a mesma. Ele pode nem perceber que é o intruso.'
+      : 'O intruso não recebe palavra nenhuma, só a categoria.') : null,
+    withTotal ? settingRow('Cúmplice', 'accomplice', o.accomplice, s.settings.accomplice, (v) => (v ? 'Ligado' : 'Desligado'), ed) : null,
+    withTotal ? h('p', { class: 'hint' }, `Um jogador sabe a palavra e quem é o intruso, e vence se o intruso escapar. Vale com ${s.accompliceFrom} ou mais jogadores`
+      + (s.settings.accomplice && few ? ` (faltam ${s.accompliceFrom - s.players.length}).` : '.')) : null,
     settingRow('Tempo para dar a dica', 'clueSecs', o.clueSecs, s.settings.clueSecs, fmtSecs, ed),
     settingRow('Tempo para votar', 'voteSecs', o.voteSecs, s.settings.voteSecs, fmtSecs, ed),
     ed ? null : h('p', { class: 'sub dark' }, `Só ${P(s.hostId).name} muda esses ajustes.`));
@@ -380,7 +412,9 @@ function homeScreen() {
     accountRow(),
     Cloud.enabled ? h('button', { class: 'btn', type: 'button', 'data-act': 'rank' }, 'Ranking global') : null,
     h('button', { class: 'btn primary', type: 'button', 'data-act': 'create' }, 'Criar sala'),
-    h('form', { class: 'form-row', 'data-form': 'join' }, codeIn, h('button', { class: 'btn', type: 'submit' }, 'Entrar')));
+    h('form', { class: 'form-row', 'data-form': 'join' }, codeIn, h('button', { class: 'btn', type: 'submit' }, 'Entrar')),
+    h('button', { class: 'btn', type: 'button', 'data-act': 'local' }, 'Jogar em 1 celular só'),
+    h('p', { class: 'hint light' }, 'Todo mundo na mesma roda: o celular passa de mão em mão.'));
 }
 
 function profileScreen() {
@@ -434,12 +468,31 @@ function lobbyScreen() {
     h('section', { class: 'stack' },
       h('h2', {}, 'Categoria'),
       h('div', { class: 'chips' }, s.categories.map((c) => h('button', { type: 'button', class: 'chip', 'data-act': 'category', 'data-v': c,
-        'aria-pressed': String(c === s.category), disabled: !host, 'data-key': c }, c)))),
+        'aria-pressed': String(c === s.category), disabled: !host, 'data-key': c }, c))),
+      s.category === CUSTOM_CAT ? customPanel() : null),
     h('section', { class: 'panel flat' }, h('h2', {}, 'Ajustes da partida'), settingsPanel(true)),
     host
-      ? h('button', { class: 'btn primary', type: 'button', 'data-act': 'start', disabled: need > 0 },
-          need > 0 ? `Faltam ${need} ${need === 1 ? 'jogador' : 'jogadores'}` : 'Começar partida')
+      ? h('button', { class: 'btn primary', type: 'button', 'data-act': 'start', disabled: need > 0 || (s.category === CUSTOM_CAT && s.customCount < s.customMin) },
+          need > 0 ? `Faltam ${need} ${need === 1 ? 'jogador' : 'jogadores'}`
+        : s.category === CUSTOM_CAT && s.customCount < s.customMin ? `Lista precisa de ${s.customMin} palavras` : 'Começar partida')
       : h('p', { class: 'sub', style: 'text-align:center' }, `Aguardando ${P(s.hostId).name} começar a partida`));
+}
+
+const CUSTOM_CAT = 'Personalizada';
+
+// Lista de palavras da turma. Só o anfitrião vê e edita; os outros sabem só quantas são.
+function customPanel() {
+  const s = state;
+  const count = h('p', { class: 'hint', 'data-key': 'cc' }, s.customCount
+    ? `${s.customCount} ${s.customCount === 1 ? 'palavra salva' : 'palavras salvas'} (mínimo ${s.customMin}).`
+    : `Nenhuma palavra ainda. Mínimo ${s.customMin}.`);
+  if (!isHost()) return h('div', { class: 'panel flat', 'data-key': 'custom' }, h('b', {}, 'Lista personalizada do anfitrião'), count);
+  return h('form', { class: 'panel flat', 'data-form': 'custom', 'data-key': 'custom' },
+    h('label', { for: 'custom' }, 'Palavras da turma'),
+    h('p', { class: 'hint' }, 'Separe por vírgula ou uma por linha: apelidos, piadas internas, coisas do trabalho. Os outros não veem a lista.'),
+    h('textarea', { id: 'custom', rows: 5, maxlength: 1600, placeholder: 'Ex.: Churrasco do Zé, Fusca azul, Reunião de segunda' }, (s.customWords || []).join(', ')),
+    count,
+    h('button', { class: 'btn', type: 'submit' }, 'Salvar lista'));
 }
 
 function qrPanel(link) {
@@ -454,7 +507,9 @@ function introScreen() {
   return h('div', { class: 'screen intro', 'data-screen': 'intro' },
     h('div', { class: 'hero' }, h('p', { class: 'sub' }, `Rodada ${s.matchRound} de ${s.settings.total}`), h('h1', {}, zero ? 'Todo mundo zerado' : 'Placar')),
     h('section', { class: 'panel' }, scoreRows(null)),
-    h('p', { class: 'sub' }, `Categoria: ${s.wordCategory}. ${ipLabel(s.impostorCount)}. Em instantes você vê seu papel, em segredo.`),
+    h('p', { class: 'sub' }, `Categoria: ${s.wordCategory}. ${ipLabel(s.impostorCount)}.`
+      + (s.similar ? ' Modo palavra parecida: o intruso recebeu outra palavra e pode nem saber que é ele.' : '')
+      + (s.hasAccomplice ? ' Tem um cúmplice na mesa.' : '') + ' Em instantes você vê seu papel, em segredo.'),
     spectatorNote(),
     h('div', { class: 'count', 'aria-hidden': 'true' }, h('i', { style: `--dur:${introDur}ms` })),
     isHost() ? h('button', { class: 'btn ghost', type: 'button', 'data-act': 'skip' }, 'Começar agora') : null);
@@ -467,12 +522,22 @@ function roleCard() {
     return h('button', { type: 'button', class: 'role hid', 'data-act': 'toggleRole' },
       icon('eye'), h('span', { class: 'big' }, 'Ver meu papel'), h('span', { class: 'hint' }, 'Esconda a tela dos outros antes de tocar'));
   }
+  if (s.role === 'accomplice') {
+    const names = s.knownImpostors.map((id) => P(id).name).join(' e ');
+    return h('button', { type: 'button', class: 'role show acc', 'data-act': 'toggleRole', 'aria-label': 'Esconder meu papel' },
+      h('span', { class: 'hint' }, 'Categoria: ' + s.wordCategory),
+      h('span', { class: 'big' }, 'Você é o cúmplice'),
+      h('span', { class: 'hint' }, (s.knownImpostors.length > 1 ? 'Os intrusos são ' : 'O intruso é ') + names + '. A palavra é'),
+      h('span', { class: 'big' }, s.word),
+      h('span', { class: 'hint' }, 'Ajude a despistar sem se entregar. Toque para esconder'));
+  }
   const partner = imp && s.partnerIds && s.partnerIds.length ? `Seu parceiro: ${s.partnerIds.map((id) => P(id).name).join(', ')}` : null;
   return h('button', { type: 'button', class: 'role show ' + (imp ? 'imp' : 'crew'), 'data-act': 'toggleRole', 'aria-label': 'Esconder meu papel' },
     h('span', { class: 'hint' }, 'Categoria: ' + s.wordCategory),
     imp ? [h('span', { class: 'big' }, s.impostorCount === 2 ? 'Você é um dos 2 intrusos' : 'Você é o intruso'),
       h('span', { class: 'hint' }, partner || 'Descubra a palavra sem se entregar')]
-      : [h('span', { class: 'hint' }, 'A palavra é'), h('span', { class: 'big' }, s.word)],
+      : [h('span', { class: 'hint' }, 'A palavra é'), h('span', { class: 'big' }, s.word),
+        s.similar ? h('span', { class: 'hint' }, 'O intruso recebeu uma palavra parecida. Pode ser você!') : null],
     h('span', { class: 'hint' }, 'Toque para esconder'));
 }
 
@@ -504,7 +569,11 @@ function voteScreen() {
       h('p', { class: 'sub' }, s.impostorCount === 2 ? 'São 2 intrusos: vote em quem você mais suspeita. Para vencer, a sala precisa pegar os dois.'
         : 'Conversem e votem. Dá para mudar o voto até todos votarem.'), timerBar('Tempo para votar')),
     spectatorNote(),
-    roleCard(),
+    spec ? null : h('section', {},
+      h('h2', {}, `Seu voto (${s.voted.length} de ${online} já votaram)`),
+      h('div', { class: 'vgrid' }, s.players.filter((p) => p.id !== s.you && !p.waiting).map((p) =>
+        h('button', { type: 'button', class: 'vcard', 'data-act': 'vote', 'data-id': p.id, 'aria-pressed': String(s.myVote === p.id), 'data-key': p.id },
+          h('span', { class: 'tick' }, icon('check')), av(p.avatar, 64), h('span', { class: 'nm' }, p.name), h('small', {}, clueOf(p.id)))))),
     reactionBar(),
     h('section', { class: 'panel' },
       h('h2', {}, 'Conversa'),
@@ -513,11 +582,7 @@ function voteScreen() {
       spec ? null : h('form', { class: 'form-row', 'data-form': 'chat' },
         h('input', { id: 'msg', maxlength: 120, autocomplete: 'off', placeholder: 'Escreva algo', 'aria-label': 'Mensagem para o grupo' }),
         h('button', { class: 'btn', type: 'submit', 'aria-label': 'Enviar mensagem' }, icon('send')))),
-    spec ? null : h('section', {},
-      h('h2', {}, `Seu voto (${s.voted.length} de ${online} já votaram)`),
-      h('div', { class: 'vgrid' }, s.players.filter((p) => p.id !== s.you && !p.waiting).map((p) =>
-        h('button', { type: 'button', class: 'vcard', 'data-act': 'vote', 'data-id': p.id, 'aria-pressed': String(s.myVote === p.id), 'data-key': p.id },
-          h('span', { class: 'tick' }, icon('check')), av(p.avatar, 64), h('span', { class: 'nm' }, p.name), h('small', {}, clueOf(p.id)))))));
+    roleCard());
 }
 
 function guessScreen() {
@@ -560,15 +625,20 @@ function resultScreen() {
     const suspense = R.stage > n;
     return h('div', { class: 'screen result', 'data-screen': 'result-count' },
       h('div', { class: 'hero' }, h('h1', {}, suspense ? 'O intruso é…' : 'Contando os votos'), h('p', { class: 'sub' }, `Rodada ${s.matchRound} de ${s.settings.total}`)),
-      suspense ? h('div', { class: 'drum' }, s.impostorCount === 2 ? [h('span', { 'data-key': 'q1' }, '?'), h('span', { 'data-key': 'q2' }, '?')] : h('span', { 'data-key': 'q' }, '?'))
+      suspense ? h('section', { class: 'panel' },
+          h('div', { class: 'tally spin' }, (R.spinIds || []).map((id, i) => h('div', {
+            class: 'tcell' + (R.spinIds && i === (R.spin || 0) % R.spinIds.length ? (R.landed ? ' spot landed' : ' spot') : ''), 'data-key': id },
+            av(P(id).avatar, 56), h('span', { class: 'nm' }, P(id).name)))),
+          h('p', { class: 'lastvote' }, R.landed ? (s.impostorCount === 2 ? 'E tem mais um…' : 'Achamos!') : ' '))
         : h('section', { class: 'panel' },
           h('div', { class: 'tally' }, s.players.filter((p) => !p.waiting).map((p) => h('div', { class: 'tcell' + (counts[p.id] ? ' has' : ''), 'data-key': p.id },
             av(p.avatar, 56), h('span', { class: 'nm' }, p.name), h('b', { class: 'cnt' }, counts[p.id] || 0)))),
           last ? h('p', { class: 'lastvote', 'data-key': 'lv' + shown }, h('b', {}, P(last[0]).name), ' votou em ', h('b', {}, P(last[1]).name)) : h('p', { class: 'lastvote' }, ' ')),
       h('button', { class: 'btn ghost', type: 'button', 'data-act': 'skipReveal' }, 'Pular suspense'));
   }
-  const wasImp = s.impostorIds.includes(s.you), spec = s.role === 'spectator';
-  const iWon = !spec && r.impostorWins === wasImp;
+  const spec = s.role === 'spectator';
+  const iWon = !spec && wonRound(s);
+  const acc = r.accompliceId ? P(r.accompliceId) : null;
   const why = { escaped: s.impostorCount === 2 ? 'Os intrusos escaparam da votação.' : 'O intruso escapou da votação.',
     guessed: 'Descobertos, mas acertaram a palavra.', caught: s.impostorCount === 2 ? 'Os dois intrusos foram pegos e erraram a palavra.' : 'O intruso foi pego e errou a palavra.' }[r.reason];
   const guesses = Object.entries(r.guesses);
@@ -577,7 +647,9 @@ function resultScreen() {
     h('section', { class: 'reveal' },
       h('p', { class: 'sub' }, s.impostorCount === 2 ? 'Os intrusos eram' : 'O intruso era'),
       h('div', { class: 'faces' }, s.impostorIds.map((id) => h('div', { class: 'face', 'data-key': id }, av(P(id).avatar, s.impostorCount === 2 ? 96 : 116), h('p', { class: 'who' }, P(id).name)))),
-      h('div', { class: 'facts' }, h('span', { class: 'fact' }, 'Palavra: ' + s.word),
+      acc ? h('p', { class: 'sub acc-line' }, av(acc.avatar, 34), `O cúmplice era ${acc.name}`) : null,
+      h('div', { class: 'facts' }, h('span', { class: 'fact' }, (s.altWord ? 'Palavra da turma: ' : 'Palavra: ') + s.word),
+        s.altWord ? h('span', { class: 'fact' }, 'Palavra do intruso: ' + s.altWord) : null,
         guesses.map(([pid, g]) => h('span', { class: 'fact ' + (nz(g) === nz(s.word) ? 'ok' : 'no'), 'data-key': 'g' + pid }, `Palpite de ${P(pid).name}: ${g}`))),
       h('p', { class: 'sub' }, why)),
     votes.length ? h('section', { class: 'panel flat' }, h('h2', {}, 'Votos'),
@@ -652,7 +724,8 @@ function buildHeader() {
 
 function render() {
   morph(document.getElementById('top'), buildHeader());
-  const next = state ? SCREENS[state.phase]() : (tab === 'profile' ? profileScreen() : tab === 'rank' ? rankScreen() : homeScreen());
+  const next = state ? SCREENS[state.phase]()
+    : (tab === 'profile' ? profileScreen() : tab === 'rank' ? rankScreen() : tab === 'local' ? localScreen() : homeScreen());
   const cur = view.firstElementChild;
   if (!cur || cur.getAttribute('data-screen') !== next.getAttribute('data-screen')) view.replaceChildren(next);
   else { syncAttrs(cur, next); morph(cur, next); }
@@ -748,6 +821,7 @@ const ACT = {
   signIn: () => Cloud.signIn().catch((e) => { if (!/popup-closed|cancelled/.test(String(e && e.code || e))) toast('Não consegui entrar agora.'); }),
   signOut: () => Cloud.signOut().then(() => toast('Você saiu da conta.', true)),
   rank: () => { tab = 'rank'; window.scrollTo(0, 0); loadBoard(); },
+  local: () => { tab = 'local'; window.scrollTo(0, 0); render(); },
   home: () => { tab = 'home'; window.scrollTo(0, 0); render(); },
   leave: () => {
     if (state && state.phase !== 'lobby' && state.phase !== 'final' && !confirm('Sair da sala? Você deixa esta partida.')) return;
@@ -766,6 +840,8 @@ const FORM = {
   clue: (f) => { const text = f.elements.dica.value.trim(); if (text) act('clue', { text }); },
   chat: (f) => { const i = f.elements.msg; const text = i.value.trim(); if (text) { i.value = ''; act('chat', { text }); } },
   guess: (f) => { const text = f.elements.palpite.value.trim(); if (text) act('guess', { text }); },
+  custom: (f) => api('/api/act', { code: session.code, pid: session.pid, type: 'customWords', words: f.elements.custom.value })
+    .then(() => toast('Lista salva.', true), () => {}),
 };
 
 document.addEventListener('click', (e) => {

@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const WORDS = require('./words');
+const PAIRS = require('./pairs');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -14,7 +15,13 @@ const CLUE_LAPS = 2;       // quantas dicas cada jogador dá por rodada
 const SEC = Number(process.env.SEC_MS) || 1000;           // 1 "segundo" do jogo em ms (testes usam valor menor)
 const GUESS_SECS = 20;
 const TWO_IMPOSTORS_FROM = 7;
-const OPTIONS = { total: [5, 10, 20], clueSecs: [0, 10, 15, 20, 30, 45, 60], voteSecs: [0, 30, 45, 60, 90, 120] };   // 0 = sem limite
+const OPTIONS = { total: [5, 10, 20], clueSecs: [0, 10, 15, 20, 30, 45, 60], voteSecs: [0, 30, 45, 60, 90, 120],   // 0 = sem limite
+  mode: [0, 1], accomplice: [0, 1] };   // mode 1 = palavra parecida; accomplice 1 = cúmplice ligado
+const LOBBY_ONLY = ['total', 'mode', 'accomplice'];
+const ACCOMPLICE_FROM = 6;
+const CUSTOM = 'Personalizada';
+const CUSTOM_MIN = 6;
+const CUSTOM_MAX = 60;
 const EMOJIS = ['🤔', '😂', '😱', '🔥', '👀', '👍'];
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 10;
@@ -71,8 +78,8 @@ function makePlayer(name, avatar) {
 function makeRoom(host) {
   return {
     code: newCode(), hostId: host.id, players: [host], phase: 'lobby', category: 'Todas',
-    settings: { total: 5, clueSecs: 30, voteSecs: 60 }, matchRound: 0,
-    usedWords: new Set(), wordCategory: null, word: null, impostorIds: [], roster: [], order: [], turn: 0,
+    settings: { total: 5, clueSecs: 30, voteSecs: 60, mode: 0, accomplice: 0 }, matchRound: 0, customWords: [],
+    usedWords: new Set(), wordCategory: null, word: null, altWord: null, impostorIds: [], accompliceId: null, roster: [], order: [], turn: 0,
     clues: [], votes: {}, guesses: {}, chat: [], reactions: [], reactSeq: 0, result: null, awards: null,
     deadline: 0, timer: null, armKey: '', turnStart: 0, lastActive: Date.now(),
   };
@@ -88,24 +95,32 @@ function view(room, pid) {
   const reveal = room.phase === 'result';
   const me = findPlayer(room, pid);
   const isImp = playing && room.impostorIds.includes(pid);
+  const isAcc = playing && room.accompliceId === pid;
   const spectator = playing && me.waiting;
+  // palavra parecida: até ser descoberto, o intruso se vê como tripulante (só que com a outra palavra)
+  const disguised = isImp && !!room.altWord && room.phase !== 'guess' && !reveal;
   const v = {
     code: room.code, you: pid, hostId: room.hostId, phase: room.phase,
-    categories: ['Todas', ...Object.keys(WORDS)], category: room.category,
+    categories: ['Todas', ...Object.keys(WORDS), CUSTOM], category: room.category,
     minPlayers: MIN_PLAYERS, laps: CLUE_LAPS, settings: room.settings, options: OPTIONS, emojis: EMOJIS,
-    matchRound: room.matchRound, twoFrom: TWO_IMPOSTORS_FROM,
+    matchRound: room.matchRound, twoFrom: TWO_IMPOSTORS_FROM, accompliceFrom: ACCOMPLICE_FROM,
+    customCount: room.customWords.length, customMin: CUSTOM_MIN,
     players: room.players.map((p) => ({
       id: p.id, name: p.name, avatar: p.avatar, score: p.score, online: !!p.res, waiting: p.waiting, impWins: p.stats.impWins,
     })),
   };
   v.leftMs = room.deadline ? Math.max(0, room.deadline - Date.now()) : 0;
+  if (room.phase === 'lobby' && pid === room.hostId) v.customWords = room.customWords;   // só o anfitrião vê a lista
   if (room.phase === 'final') { v.awards = room.awards; return v; }
   if (!playing) return v;
-  v.role = spectator ? 'spectator' : (isImp ? 'impostor' : 'crew');
+  v.role = spectator ? 'spectator' : disguised ? 'crew' : isImp ? 'impostor' : isAcc ? 'accomplice' : 'crew';
   v.impostorCount = room.impostorIds.length;
+  v.similar = !!room.altWord;
+  v.hasAccomplice = !!room.accompliceId;
   v.wordCategory = room.wordCategory;
-  v.word = (isImp || spectator) && !reveal ? null : room.word;
-  if (isImp && !reveal) v.partnerIds = room.impostorIds.filter((id) => id !== pid);
+  v.word = reveal ? room.word : disguised ? room.altWord : (isImp || spectator) ? null : room.word;
+  if (isImp && !reveal && !disguised) v.partnerIds = room.altWord ? [] : room.impostorIds.filter((id) => id !== pid);
+  if (isAcc && !reveal) v.knownImpostors = room.impostorIds;
   v.order = room.order;
   v.turn = room.turn;
   v.totalTurns = room.order.length * CLUE_LAPS;
@@ -115,7 +130,7 @@ function view(room, pid) {
   v.voted = Object.keys(room.votes);        // quem já votou (sem revelar em quem)
   v.myVote = room.votes[pid] || null;
   if (room.phase === 'guess') { v.accusedIds = room.impostorIds; v.guessed = Object.keys(room.guesses); }
-  if (reveal) { v.impostorIds = room.impostorIds; v.result = room.result; }
+  if (reveal) { v.impostorIds = room.impostorIds; v.accompliceId = room.accompliceId; v.altWord = room.altWord; v.result = room.result; }
   return v;
 }
 
@@ -129,27 +144,45 @@ function broadcast(room) {
 }
 
 // ---------- regras ----------
-function pickWord(room) {
-  const cat = room.category === 'Todas' ? pick(Object.keys(WORDS)) : room.category;
-  let free = WORDS[cat].filter((w) => !room.usedWords.has(cat + '|' + w));
-  if (!free.length) {                                   // categoria esgotada na sala: recomeça só ela
-    for (const w of WORDS[cat]) room.usedWords.delete(cat + '|' + w);
-    free = WORDS[cat];
+// Sorteia sem repetir na sala; quando a lista esgota, recomeça só ela.
+function pickFresh(room, key, list) {
+  let free = list.filter((x) => !room.usedWords.has(key + '|' + x));
+  if (!free.length) {
+    for (const x of list) room.usedWords.delete(key + '|' + x);
+    free = list;
   }
-  const word = pick(free);
-  room.usedWords.add(cat + '|' + word);
-  return { cat, word };
+  const x = pick(free);
+  room.usedWords.add(key + '|' + x);
+  return x;
+}
+
+// No modo palavra parecida volta também a palavra do intruso (alt).
+function pickWord(room) {
+  const similar = room.settings.mode === 1;
+  if (room.category === CUSTOM) {
+    const list = room.customWords;
+    const word = pickFresh(room, CUSTOM, list);
+    return { cat: CUSTOM, word, alt: similar ? pick(list.filter((w) => w !== word)) : null };
+  }
+  const cat = room.category === 'Todas' ? pick(Object.keys(WORDS)) : room.category;
+  if (!similar) return { cat, word: pickFresh(room, cat, WORDS[cat]), alt: null };
+  const pair = pickFresh(room, 'par:' + cat, PAIRS[cat]).split('|');
+  const flip = crypto.randomInt(2);
+  return { cat, word: pair[flip], alt: pair[1 - flip] };
 }
 
 function startRound(room) {
   room.players = room.players.filter((p) => p.res || !p.waiting);
   for (const p of room.players) p.waiting = false;
   room.roster = room.players.map((p) => p.id);
-  const { cat, word } = pickWord(room);
+  const { cat, word, alt } = pickWord(room);
   room.wordCategory = cat;
   room.word = word;
+  room.altWord = alt;
   const k = room.roster.length >= TWO_IMPOSTORS_FROM ? 2 : 1;
-  room.impostorIds = shuffle(room.roster).slice(0, k);
+  const drawn = shuffle(room.roster);
+  room.impostorIds = drawn.slice(0, k);
+  room.accompliceId = room.settings.accomplice && room.roster.length >= ACCOMPLICE_FROM ? drawn[k] : null;
   room.order = shuffle(room.roster);
   room.turn = 0;
   room.clues = [];
@@ -166,10 +199,10 @@ function finish(room, reason, guess) {
   const impostorWins = reason !== 'caught';
   const delta = {};
   for (const id of room.roster) {
-    const isImp = room.impostorIds.includes(id);
-    delta[id] = impostorWins ? (isImp ? 2 : 0) : (isImp ? 0 : 1);
+    const isImp = room.impostorIds.includes(id), isAcc = id === room.accompliceId;
+    delta[id] = impostorWins ? (isImp || isAcc ? 2 : 0) : (isImp || isAcc ? 0 : 1);   // o cúmplice vence junto com o intruso
     // intruso escapou da votação: quem votou num intruso de verdade ainda leva +1
-    if (reason === 'escaped' && !isImp && room.impostorIds.includes(room.votes[id])) delta[id] = 1;
+    if (reason === 'escaped' && !isImp && !isAcc && room.impostorIds.includes(room.votes[id])) delta[id] = 1;
     const p = findPlayer(room, id);
     if (p) { p.score += delta[id]; if (impostorWins && isImp) p.stats.impWins++; }
   }
@@ -179,7 +212,7 @@ function finish(room, reason, guess) {
     const vp = findPlayer(room, voter);
     if (vp && room.impostorIds.includes(target)) vp.stats.rightVotes++;
   }
-  room.result = { impostorWins, reason, guesses: { ...room.guesses }, votes: { ...room.votes }, delta, last: room.matchRound >= room.settings.total };
+  room.result = { impostorWins, reason, guesses: { ...room.guesses }, votes: { ...room.votes }, delta, accompliceId: room.accompliceId, last: room.matchRound >= room.settings.total };
   room.phase = 'result';
 }
 
@@ -282,14 +315,27 @@ function act(room, player, body) {
     case 'category': {
       if (room.phase !== 'lobby' || !isHost) fail('Só o anfitrião muda a categoria.');
       const c = clean(body.value, 30);
-      if (c !== 'Todas' && !WORDS[c]) fail('Categoria inválida.');
+      if (c !== 'Todas' && c !== CUSTOM && !WORDS[c]) fail('Categoria inválida.');
       room.category = c;
+      break;
+    }
+    case 'customWords': {
+      if (room.phase !== 'lobby' || !isHost) fail('Só o anfitrião monta a lista.');
+      const raw = Array.isArray(body.words) ? body.words : String(body.words || '').split(/[,;\n]/);
+      const seen = new Set(), list = [];
+      for (const w of raw.slice(0, 200)) {
+        const t = clean(w, 24);
+        if (t && !seen.has(norm(t))) { seen.add(norm(t)); list.push(t); }
+      }
+      if (list.length > CUSTOM_MAX) fail(`No máximo ${CUSTOM_MAX} palavras.`);
+      room.customWords = list;
+      for (const k of [...room.usedWords]) if (k.startsWith(CUSTOM + '|')) room.usedWords.delete(k);
       break;
     }
     case 'settings': {
       if (!isHost) fail('Só o anfitrião muda os tempos.');
       const key = String(body.key);
-      if (key === 'total') { if (room.phase !== 'lobby') fail('O tamanho da partida só muda no lobby.'); }
+      if (LOBBY_ONLY.includes(key)) { if (room.phase !== 'lobby') fail('Esse ajuste só muda no lobby.'); }
       else if (room.phase !== 'lobby' && room.phase !== 'result') fail('Os tempos mudam no lobby ou entre as rodadas.');
       setSetting(room, key, body.value);
       break;
@@ -305,6 +351,7 @@ function act(room, player, body) {
     case 'start':
       if (room.phase !== 'lobby' || !isHost) fail('Só o anfitrião inicia a partida.');
       if (room.players.length < MIN_PLAYERS) fail(`São necessários ${MIN_PLAYERS} jogadores.`);
+      if (room.category === CUSTOM && room.customWords.length < CUSTOM_MIN) fail(`A lista personalizada precisa de pelo menos ${CUSTOM_MIN} palavras.`);
       room.matchRound = 0;
       for (const p of room.players) { p.score = 0; p.stats = blankStats(); }
       startRound(room);
@@ -334,7 +381,8 @@ function act(room, player, body) {
       if (room.order[room.turn % room.order.length] !== player.id) fail('Não é a sua vez.');
       const text = clean(body.text, 24);
       if (!text) fail('Escreva uma dica.');
-      if (norm(text) === norm(room.word)) fail('Essa dica entrega a palavra!');
+      const own = room.impostorIds.includes(player.id) ? room.altWord : room.word;   // compara só com a palavra que a pessoa recebeu
+      if (own && norm(text) === norm(own)) fail('Essa dica entrega a palavra!');
       player.stats.clueMs += Date.now() - room.turnStart;
       player.stats.clues++;
       room.clues.push({ pid: player.id, text, round: Math.floor(room.turn / room.order.length) + 1 });
@@ -407,7 +455,7 @@ function readJson(req) {
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > 2048) { reject(new GameError('Requisição grande demais.')); req.destroy(); return; }
+      if (size > 4096) { reject(new GameError('Requisição grande demais.')); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => {
@@ -498,8 +546,9 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/healthz') { res.writeHead(200); res.end('ok'); return; }
   const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
   const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
-  const file = path.join(PUBLIC, rel);
-  if (file.startsWith(PUBLIC + path.sep) && MIME[path.extname(file)]) {
+  const ROOT_FILES = new Set(['words.js', 'pairs.js']);   // bancos de palavras também servem o modo 1 celular
+  const file = ROOT_FILES.has(rel) ? path.join(__dirname, rel) : path.join(PUBLIC, rel);
+  if ((ROOT_FILES.has(rel) || file.startsWith(PUBLIC + path.sep)) && MIME[path.extname(file)]) {
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404); res.end('Não encontrado'); return; }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(file)], 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
