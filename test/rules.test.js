@@ -63,6 +63,17 @@ const imps = (ps) => ps.filter((p) => p.v.role === 'impostor');
     assert.strictEqual(ps[0].v.players.find((x) => x.id === imp.pid).score, 2);
   });
 
+  await test('intruso escapa: quem votou nele certo ganha +1', async () => {
+    const ps = await room(5); await toVote(ps);
+    const imp = imps(ps)[0], [a, b, c, d] = ps.filter((p) => p !== imp);
+    for (const p of [a, b]) await p.act({ type: 'vote', target: imp.pid });
+    for (const p of [imp, c, d]) await p.act({ type: 'vote', target: a.pid });
+    await sleep(20);
+    assert.strictEqual(ps[0].v.result.reason, 'escaped');
+    const sc = (p) => ps[0].v.players.find((x) => x.id === p.pid).score;
+    assert.deepStrictEqual([sc(imp), sc(a), sc(b), sc(c), sc(d)], [2, 1, 1, 0, 0]);
+  });
+
   await test('dois intrusos: precisa pegar os dois', async () => {
     const ps = await room(7); await toVote(ps);
     const [a, b] = imps(ps); const inn = ps.filter((p) => p !== a && p !== b);

@@ -168,6 +168,8 @@ function finish(room, reason, guess) {
   for (const id of room.roster) {
     const isImp = room.impostorIds.includes(id);
     delta[id] = impostorWins ? (isImp ? 2 : 0) : (isImp ? 0 : 1);
+    // intruso escapou da votação: quem votou num intruso de verdade ainda leva +1
+    if (reason === 'escaped' && !isImp && room.impostorIds.includes(room.votes[id])) delta[id] = 1;
     const p = findPlayer(room, id);
     if (p) { p.score += delta[id]; if (impostorWins && isImp) p.stats.impWins++; }
   }

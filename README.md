@@ -21,7 +21,7 @@ comando de start `node server.js`; a porta vem da variável `PORT`.
 3. Todos veem a palavra; o intruso só vê a categoria.
 4. 2 voltas de dicas (uma palavra por vez), depois chat e votação.
 5. Intruso pego tem uma chance de adivinhar a palavra.
-6. Pontos: tripulação +1 cada se vencer; intruso +2 se vencer.
+6. Pontos: tripulação +1 cada se vencer; intruso +2 se vencer. Se o intruso escapar da votação, quem votou nele mesmo assim ganha +1.
 
 ## Limites conhecidos do protótipo
 Salas ficam na memória (reiniciar o servidor apaga tudo; uma instância só).
