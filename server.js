@@ -533,8 +533,18 @@ async function handleApi(req, res, url) {
   fail('Rota inexistente.');
 }
 
+// O jogo web agora roda dentro da Vila Sossego (github.com/Junin12/vila-sossego, em /intruso/).
+// Com MUDOU_PARA definido (no Render), este servidor só manda quem chega pelo endereço antigo para lá,
+// mantendo o caminho e o código da sala (?sala=ABCD). Sem a variável, roda o jogo como antes (desenvolvimento).
+const MUDOU_PARA = process.env.MUDOU_PARA || '';
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (MUDOU_PARA && url.pathname !== '/healthz') {
+    res.writeHead(req.method === 'GET' || req.method === 'HEAD' ? 302 : 307, { Location: MUDOU_PARA + url.pathname.replace(/^\/+/, '') + url.search });
+    res.end();
+    return;
+  }
   if (url.pathname.startsWith('/api/')) {
     handleApi(req, res, url).catch((e) => {
       if (!(e instanceof GameError)) console.error(e);

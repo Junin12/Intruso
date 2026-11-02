@@ -2,6 +2,11 @@
 
 Jogo de festa multijogador: cada pessoa entra pelo próprio celular, todos recebem a mesma palavra secreta, menos o intruso.
 
+> **Mudança (nov/2026):** o jogo web agora roda dentro da **Vila Sossego** (repositório `Junin12/vila-sossego`, em `/intruso/`),
+> no mesmo servidor do Cara de Pau e do Ninguém Dorme, e soma no Passaporte da Vila. Mudanças no jogo web são feitas lá.
+> Este repositório guarda o app Android (`android/`, que abre https://vila-sossego.onrender.com/intruso/) e a loja (`play-store/`).
+> No Render, o serviço antigo (`intruso-eaza.onrender.com`) roda com `MUDOU_PARA` e só redireciona para o endereço novo.
+
 ## Rodar
     node server.js          # precisa de Node 18+; não há dependências para instalar
     # abra http://localhost:3000

@@ -7,3 +7,7 @@ services:
     buildCommand: echo "sem dependências"
     startCommand: node server.js
     healthCheckPath: /healthz
+    envVars:
+      # o jogo web mudou para a Vila Sossego: este serviço só redireciona o endereço antigo
+      - key: MUDOU_PARA
+        value: https://vila-sossego.onrender.com/intruso/
