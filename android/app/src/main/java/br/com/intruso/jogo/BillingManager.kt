@@ -6,6 +6,7 @@ import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.ConsumeParams
 import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
@@ -15,9 +16,16 @@ import com.android.billingclient.api.QueryPurchasesParams
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Compras únicas no Google Play: remove_ads e avatar_pack (cadastre os dois no Play Console como "produto único"). */
+/**
+ * Compras no Google Play (cadastre todos no Play Console como "produto único"):
+ *  - remove_ads, avatar_pack, vila_completa: ficam para sempre (acknowledge).
+ *  - passe_noite: consumível (24h de tudo liberado; dá para comprar de novo em outra noite). É consumido logo depois da compra.
+ */
 class BillingManager(private val act: Activity, private val emit: (JSONObject) -> Unit) : PurchasesUpdatedListener {
-    companion object { val IDS = listOf("remove_ads", "avatar_pack") }
+    companion object {
+        val IDS = listOf("remove_ads", "avatar_pack", "vila_completa", "passe_noite")
+        val CONSUMIVEIS = setOf("passe_noite")
+    }
 
     private val client: BillingClient = BillingClient.newBuilder(act)
         .setListener(this)
@@ -60,11 +68,23 @@ class BillingManager(private val act: Activity, private val emit: (JSONObject) -
         }
     }
 
-    /** Confirma (acknowledge) as compras concluídas — sem isso o Google estorna em 3 dias — e devolve os ids. */
+    /**
+     * Confirma (acknowledge) as compras concluídas — sem isso o Google estorna em 3 dias — e devolve os ids que ficam.
+     * Consumível (passe_noite): consome e avisa o jogo ("purchased"), inclusive se o app fechou antes de consumir.
+     */
     private fun handle(purchases: List<Purchase>): List<String> {
         val owned = mutableListOf<String>()
         for (p in purchases) {
             if (p.purchaseState != Purchase.PurchaseState.PURCHASED) continue
+            val consumivel = p.products.any { it in CONSUMIVEIS }
+            if (consumivel) {
+                client.consumeAsync(ConsumeParams.newBuilder().setPurchaseToken(p.purchaseToken).build()) { r, _ ->
+                    if (r.responseCode == BillingClient.BillingResponseCode.OK) {
+                        p.products.filter { it in CONSUMIVEIS }.forEach { emit(JSONObject().put("type", "purchased").put("id", it)) }
+                    }
+                }
+                continue
+            }
             if (!p.isAcknowledged) {
                 client.acknowledgePurchase(AcknowledgePurchaseParams.newBuilder().setPurchaseToken(p.purchaseToken).build()) { }
             }
